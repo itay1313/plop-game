@@ -108,6 +108,7 @@
     גְּרֹר את האצבע <b>ימינה ושמאלה</b> כדי לתמרן<br>
     <span class="kbd-hint">במחשב: חיצים <b>← →</b></span><br>
     אֱסֹף <b>🌽 תירס</b> · חֲמֹק מ-<b>🪠 מכשולים</b><br>
+    תְּפֹס <b>🛡️ מגן</b> — חסינות שמרסקת הכל!<br>
     כמה עמוק תצליח לצלול? 🏆
   </div>
   <div id="lb-start" class="leaderboard"></div>
@@ -168,6 +169,8 @@ function beep(freq, dur, type, vol){
 }
 function sCollect(n){ beep(520+Math.min(n,12)*45, 0.12, 'triangle', 0.16); }
 function sHit(){ beep(140,0.18,'sawtooth',0.22); setTimeout(()=>beep(90,0.25,'square',0.2),60); }
+function sSmash(){ beep(320,0.08,'square',0.18); setTimeout(()=>beep(180,0.12,'sawtooth',0.16),40); }
+function sPower(){ beep(440,0.1,'triangle',0.18); setTimeout(()=>beep(660,0.1,'triangle',0.18),80); setTimeout(()=>beep(880,0.14,'triangle',0.18),160); }
 function sStart(){ beep(330,0.1,'triangle',0.16); setTimeout(()=>beep(550,0.14,'triangle',0.16),90); }
 function sPlop(){ beep(220,0.08,'sine',0.12); }
 
@@ -189,6 +192,7 @@ const lbStartEl = document.getElementById('lb-start');
 
 let player, obstacles, items, particles, bubbles, bokeh;
 let scrollY, speed, depthM, corn, score, comboTimer, comboMult, spawnAcc, itemAcc;
+let shieldTimer, powerAcc, flashGood;
 let shake, flashHit, lastTime, frame;
 let targetX; // finger target
 
@@ -227,8 +231,9 @@ function reset(){
   player = { x:W/2, y:H*0.30, r:pr, vx:0, rot:0, squish:1 };
   targetX = W/2;
   obstacles=[]; items=[]; particles=[]; bubbles=[]; bokeh=[];
-  scrollY=0; speed=H*0.34; depthM=0; corn=0; score=0;
+  scrollY=0; speed=H*0.28; depthM=0; corn=0; score=0;
   comboTimer=0; comboMult=1; spawnAcc=0; itemAcc=0;
+  shieldTimer=0; powerAcc=0; flashGood=0;
   shake=0; flashHit=0; frame=0;
   for(let i=0;i<16;i++) bubbles.push(newBubble(Math.random()*H));
   for(let i=0;i<7;i++) bokeh.push(newBokeh(Math.random()*H));
@@ -263,19 +268,28 @@ const OBS = [
 ];
 
 function spawnObstacle(){
-  const r = playerRadius()*(0.85+Math.random()*0.5);
+  const r = playerRadius()*(0.68+Math.random()*0.4);
   const margin = r+10;
-  const x = margin + Math.random()*(W-2*margin);
+  let x = margin + Math.random()*(W-2*margin);
+  // keep it fair: avoid spawning right on top of the player's current column
+  if(player && Math.abs(x-player.x) < player.r*1.6){
+    x = (player.x < W/2) ? Math.min(W-margin, x+player.r*2.2) : Math.max(margin, x-player.r*2.2);
+  }
   const o = OBS[(Math.random()*OBS.length)|0];
-  obstacles.push({ x, y:H+r+10, r, e:o.e, rot:(Math.random()-0.5)*0.6, rs:(Math.random()-0.5)*0.04, drift:(Math.random()-0.5)*0.4 });
+  obstacles.push({ x, y:H+r+10, r, e:o.e, rot:(Math.random()-0.5)*0.6, rs:(Math.random()-0.5)*0.04, drift:(Math.random()-0.5)*0.3, passed:false });
 }
 function spawnItem(){
   const r = playerRadius()*0.62;
   const margin = r+10;
   const x = margin + Math.random()*(W-2*margin);
-  // 12% chance for toilet paper power = magnet-ish bonus (just big points)
   const golden = Math.random()<0.12;
-  items.push({ x, y:H+r+10, r, e: golden?'⭐':'🌽', val: golden?5:1, golden, bob:Math.random()*6.28 });
+  items.push({ x, y:H+r+10, r, kind: golden?'star':'corn', e: golden?'⭐':'🌽', val: golden?5:1, golden, bob:Math.random()*6.28 });
+}
+function spawnPower(){ // shield power-up
+  const r = playerRadius()*0.7;
+  const margin = r+10;
+  const x = margin + Math.random()*(W-2*margin);
+  items.push({ x, y:H+r+10, r, kind:'shield', e:'🛡️', val:0, golden:false, bob:Math.random()*6.28 });
 }
 
 // ---------- Particles ----------
@@ -384,9 +398,9 @@ renderLB(lbStartEl); // show standings on the menu
 // ---------- Update ----------
 function update(dt){
   frame++;
-  // difficulty ramp
-  speed = H*0.34 + depthM*0.55;
-  if(speed>H*1.15) speed=H*1.15;
+  // difficulty ramp — gentler start, lower cap (fairer to dodge)
+  speed = H*0.28 + depthM*0.40;
+  if(speed>H*0.95) speed=H*0.95;
 
   scrollY += speed*dt;
   depthM = Math.floor(scrollY/45);
@@ -408,12 +422,15 @@ function update(dt){
   player.rot = Math.max(-0.5, Math.min(0.5, player.vx*0.0011));
   player.squish += (1 - player.squish)*Math.min(1,dt*8);
 
-  // spawn pacing scales with speed
+  // spawn pacing — fewer obstacles, gentler ramp, always room to pass
   spawnAcc += dt;
-  const obsInterval = Math.max(0.42, 0.95 - depthM*0.006);
-  if(spawnAcc>=obsInterval){ spawnAcc=0; spawnObstacle(); if(depthM>40 && Math.random()<0.35) spawnObstacle(); }
+  const obsInterval = Math.max(0.72, 1.30 - depthM*0.004);
+  if(spawnAcc>=obsInterval){ spawnAcc=0; spawnObstacle(); if(depthM>140 && Math.random()<0.25) spawnObstacle(); }
   itemAcc += dt;
-  if(itemAcc>=0.55){ itemAcc=0; if(Math.random()<0.8) spawnItem(); }
+  if(itemAcc>=0.55){ itemAcc=0; if(Math.random()<0.82) spawnItem(); }
+  // shield power-ups appear occasionally once you're a bit deeper
+  powerAcc += dt;
+  if(depthM>12 && powerAcc>=11){ powerAcc=0; if(Math.random()<0.85) spawnPower(); }
 
   // move obstacles up
   for(let i=obstacles.length-1;i>=0;i--){
@@ -422,12 +439,28 @@ function update(dt){
     o.x += o.drift;
     o.rot += o.rs;
     if(o.y < -o.r-20){ obstacles.splice(i,1); continue; }
-    // collision
+    // collision — more forgiving hitbox so near-misses feel fair
     const dxo=o.x-player.x, dyo=o.y-player.y;
-    const rr=(o.r*0.72+player.r*0.78);
+    const rr=(o.r*0.60+player.r*0.60);
     if(dxo*dxo+dyo*dyo < rr*rr){
+      if(shieldTimer>0){
+        // SHIELD: smash through the obstacle instead of dying
+        obstacles.splice(i,1);
+        burst(o.x,o.y,'#8fe3ff',22,2.4); burst(o.x,o.y,'#ffffff',10,1.4);
+        score+=50; shake=Math.max(shake,9); sSmash();
+        continue;
+      }
       shake=18; burst(player.x,player.y,'#8a5417',26,2.2);
       gameOver(); return;
+    }
+    // near-miss bonus — reward a clean dodge with points + a sparkle
+    if(!o.passed && o.y < player.y){
+      o.passed=true;
+      const adx=Math.abs(o.x-player.x), close=player.r+o.r;
+      if(adx < close*1.3 && adx > close*0.7){
+        score+=15;
+        burst(player.x+(o.x>player.x?player.r:-player.r), player.y, '#ffffff', 6, 1.1);
+      }
     }
   }
   // move items up
@@ -436,9 +469,15 @@ function update(dt){
     it.y -= speed*dt; it.bob+=dt*5;
     if(it.y < -it.r-20){ items.splice(i,1); comboMult=1; comboEl.classList.remove('show'); continue; }
     const dxi=it.x-player.x, dyi=it.y-player.y;
-    const rr=(it.r*0.7+player.r*0.8);
+    const rr=(it.r*0.8+player.r*0.85); // slightly generous pickup = satisfying
     if(dxi*dxi+dyi*dyi < rr*rr){
       items.splice(i,1);
+      if(it.kind==='shield'){
+        shieldTimer=6; flashGood=1; player.squish=1.4;
+        burst(it.x,it.y,'#8fe3ff',26,2.0); sPower();
+        if(navigator.vibrate) navigator.vibrate(40);
+        continue;
+      }
       comboTimer=1.6; comboMult=Math.min(comboMult+1, 9);
       const gained = it.val*comboMult;
       corn += it.val; score += gained*10;
@@ -451,6 +490,8 @@ function update(dt){
   }
   // combo decay
   if(comboTimer>0){ comboTimer-=dt; if(comboTimer<=0){ comboMult=1; comboEl.classList.remove('show'); } }
+  if(shieldTimer>0) shieldTimer-=dt;
+  if(flashGood>0) flashGood-=dt*2;
 
   // particles
   for(let i=particles.length-1;i>=0;i--){
@@ -644,15 +685,23 @@ function render(){
   vg.addColorStop(1,'rgba(4,14,38,0.30)');
   ctx.fillStyle=vg; ctx.fillRect(-40,-40,W+80,H+80);
 
-  // items — tight bright glow hugging each emoji so the corn reads clearly yellow
+  // items — bright glow hugging each emoji (corn=yellow, shield=cyan)
   for(const it of items){
     const s = it.r*2*(1+Math.sin(it.bob)*0.07);
     const yy = it.y+Math.sin(it.bob)*3;
     ctx.save();
-    ctx.shadowColor = it.golden ? 'rgba(255,236,120,0.95)' : 'rgba(255,222,60,0.9)';
-    ctx.shadowBlur = it.golden ? 18 : 13;
+    if(it.kind==='shield'){
+      // pulsing cyan ring so the power-up stands out
+      const pulse=0.5+0.5*Math.sin(it.bob*1.5);
+      ctx.strokeStyle='rgba(143,227,255,'+(0.5+pulse*0.4)+')'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(it.x,yy,it.r*1.25+pulse*4,0,6.28); ctx.stroke();
+      ctx.shadowColor='rgba(120,220,255,0.95)'; ctx.shadowBlur=20;
+    } else {
+      ctx.shadowColor = it.golden ? 'rgba(255,236,120,0.95)' : 'rgba(255,222,60,0.9)';
+      ctx.shadowBlur = it.golden ? 18 : 13;
+    }
     drawEmoji(it.e,it.x,yy,s,0,1,1);
-    drawEmoji(it.e,it.x,yy,s,0,1,1); // second pass = punchier glow, emoji stays crisp
+    drawEmoji(it.e,it.x,yy,s,0,1,1);
     ctx.restore();
   }
 
@@ -674,6 +723,21 @@ function render(){
     ctx.globalAlpha=1;
     const sq=player.squish;
     drawPoop(player.x, player.y, player.r, player.rot, 1/sq, sq, lean, t);
+
+    // SHIELD aura — glowing bubble (blinks in the last 1.5s)
+    if(shieldTimer>0){
+      const blink = shieldTimer>1.5 || (Math.floor(frame/4)%2===0);
+      if(blink){
+        const br = player.r*1.7 + Math.sin(frame*0.15)*3;
+        const sg=ctx.createRadialGradient(player.x,player.y,br*0.5,player.x,player.y,br);
+        sg.addColorStop(0,'rgba(143,227,255,0)');
+        sg.addColorStop(0.8,'rgba(143,227,255,0.18)');
+        sg.addColorStop(1,'rgba(143,227,255,0.05)');
+        ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(player.x,player.y,br,0,6.28); ctx.fill();
+        ctx.strokeStyle='rgba(180,240,255,0.85)'; ctx.lineWidth=2.5;
+        ctx.beginPath(); ctx.arc(player.x,player.y,br,0,6.28); ctx.stroke();
+      }
+    }
   }
 
   // particles
@@ -683,7 +747,8 @@ function render(){
   }
   ctx.globalAlpha=1;
 
-  // hit flash
+  // flashes
+  if(flashGood>0){ ctx.fillStyle='rgba(143,227,255,'+(flashGood*0.28)+')'; ctx.fillRect(-40,-40,W+80,H+80); }
   if(flashHit>0){ ctx.fillStyle='rgba(255,60,40,'+(flashHit*0.4)+')'; ctx.fillRect(-40,-40,W+80,H+80); }
 
   ctx.restore();
