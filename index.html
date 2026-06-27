@@ -142,6 +142,7 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 let W=0, H=0, DPR=1;
+var gameReady=false; // true once player/state exist (avoids TDZ on the initial resize() call)
 
 function resize(){
   DPR = Math.min(window.devicePixelRatio||1, 2.5);
@@ -149,6 +150,13 @@ function resize(){
   canvas.style.width = W+'px'; canvas.style.height = H+'px';
   canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
   ctx.setTransform(DPR,0,0,DPR,0,0);
+  // keep the player consistent if the viewport changes mid-game (e.g. iOS address bar)
+  if(gameReady && player){
+    const pr = playerRadius(); player.r = pr;
+    player.y = H*0.30;
+    player.x = Math.max(pr, Math.min(W-pr, player.x));
+    targetX  = Math.max(pr, Math.min(W-pr, targetX));
+  }
 }
 window.addEventListener('resize', resize);
 resize();
@@ -259,37 +267,31 @@ function newBokeh(y){
 
 // ---------- Spawning ----------
 // Obstacles scroll UP (player dives down). They appear at bottom (y=H) and move up.
-const OBS = [
-  {e:'🪠', label:'plunger'},
-  {e:'🧽', label:'sponge'},
-  {e:'🪥', label:'brush'},
-  {e:'🦆', label:'duck'},
-  {e:'🧻', label:'paper'}, // harmless-looking but it's an obstacle (tangle)
-];
+const OBS = ['plunger','sponge','brush','duck','paper'];
 
 function spawnObstacle(){
-  const r = playerRadius()*(0.68+Math.random()*0.4);
+  const r = playerRadius()*(0.70+Math.random()*0.4);
   const margin = r+10;
   let x = margin + Math.random()*(W-2*margin);
   // keep it fair: avoid spawning right on top of the player's current column
   if(player && Math.abs(x-player.x) < player.r*1.6){
     x = (player.x < W/2) ? Math.min(W-margin, x+player.r*2.2) : Math.max(margin, x-player.r*2.2);
   }
-  const o = OBS[(Math.random()*OBS.length)|0];
-  obstacles.push({ x, y:H+r+10, r, e:o.e, rot:(Math.random()-0.5)*0.6, rs:(Math.random()-0.5)*0.04, drift:(Math.random()-0.5)*0.3, passed:false });
+  const type = OBS[(Math.random()*OBS.length)|0];
+  obstacles.push({ x, y:H+r+10, r, type, rot:(Math.random()-0.5)*0.35, rs:(Math.random()-0.5)*0.012, drift:(Math.random()-0.5)*0.3, passed:false });
 }
 function spawnItem(){
   const r = playerRadius()*0.62;
   const margin = r+10;
   const x = margin + Math.random()*(W-2*margin);
   const golden = Math.random()<0.12;
-  items.push({ x, y:H+r+10, r, kind: golden?'star':'corn', e: golden?'⭐':'🌽', val: golden?5:1, golden, bob:Math.random()*6.28 });
+  items.push({ x, y:H+r+10, r, kind: golden?'star':'corn', val: golden?5:1, golden, bob:Math.random()*6.28 });
 }
 function spawnPower(){ // shield power-up
   const r = playerRadius()*0.7;
   const margin = r+10;
   const x = margin + Math.random()*(W-2*margin);
-  items.push({ x, y:H+r+10, r, kind:'shield', e:'🛡️', val:0, golden:false, bob:Math.random()*6.28 });
+  items.push({ x, y:H+r+10, r, kind:'shield', val:0, golden:false, bob:Math.random()*6.28 });
 }
 
 // ---------- Particles ----------
@@ -552,6 +554,121 @@ function starPath(cx,cy,ro,ri,pts){
   }
   ctx.closePath();
 }
+function roundRectPath(x,y,w,h,rad){
+  ctx.beginPath();
+  ctx.moveTo(x+rad,y);
+  ctx.arcTo(x+w,y,x+w,y+h,rad);
+  ctx.arcTo(x+w,y+h,x,y+h,rad);
+  ctx.arcTo(x,y+h,x,y,rad);
+  ctx.arcTo(x,y,x+w,y,rad);
+  ctx.closePath();
+}
+
+// ===== Custom vector COLLECTIBLES (drawn centred at origin; caller translates) =====
+function vecCorn(r){
+  // husk leaves
+  ctx.fillStyle='#57b948';
+  ctx.beginPath(); ctx.ellipse(-r*0.40,-r*0.30,r*0.30,r*0.72,0.6,0,6.28); ctx.fill();
+  ctx.fillStyle='#46a23a';
+  ctx.beginPath(); ctx.ellipse( r*0.40,-r*0.30,r*0.30,r*0.72,-0.6,0,6.28); ctx.fill();
+  // cob
+  const g=ctx.createLinearGradient(-r*0.5,0,r*0.5,0);
+  g.addColorStop(0,'#f0a91a'); g.addColorStop(0.5,'#ffdc52'); g.addColorStop(1,'#f0a91a');
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.ellipse(0,r*0.06,r*0.52,r*0.92,0,0,6.28); ctx.fill();
+  // kernels
+  ctx.fillStyle='rgba(188,128,8,0.42)';
+  for(let row=-3;row<=3;row++){
+    for(let col=-2;col<=2;col++){
+      const ox=(row&1?0.13:0), kx=(col*0.24+ox)*r, ky=(row*0.24+0.06)*r;
+      if((kx*kx)/(0.46*r*0.46*r)+(ky*ky)/(0.9*r*0.9*r)<=1){ ctx.beginPath(); ctx.arc(kx,ky,r*0.058,0,6.28); ctx.fill(); }
+    }
+  }
+  // sheen
+  ctx.fillStyle='rgba(255,255,255,0.28)';
+  ctx.beginPath(); ctx.ellipse(-r*0.18,-r*0.22,r*0.11,r*0.32,-0.2,0,6.28); ctx.fill();
+}
+function vecStar(r){
+  const g=ctx.createLinearGradient(0,-r,0,r);
+  g.addColorStop(0,'#ffe680'); g.addColorStop(1,'#ffb31e');
+  starPath(0,0,r*0.98,r*0.44,5); ctx.fillStyle=g; ctx.fill();
+  ctx.lineWidth=r*0.1; ctx.strokeStyle='#e89a10'; ctx.lineJoin='round'; ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.beginPath(); ctx.ellipse(-r*0.2,-r*0.28,r*0.16,r*0.1,-0.5,0,6.28); ctx.fill();
+}
+function vecShield(r){
+  const g=ctx.createLinearGradient(0,-r,0,r);
+  g.addColorStop(0,'#8fe7ff'); g.addColorStop(1,'#2f9fd6');
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.moveTo(0,-r*0.95);
+  ctx.lineTo(r*0.82,-r*0.55);
+  ctx.lineTo(r*0.82,r*0.12);
+  ctx.quadraticCurveTo(r*0.82,r*0.72,0,r*1.02);
+  ctx.quadraticCurveTo(-r*0.82,r*0.72,-r*0.82,r*0.12);
+  ctx.lineTo(-r*0.82,-r*0.55);
+  ctx.closePath(); ctx.fill();
+  ctx.lineWidth=r*0.09; ctx.strokeStyle='rgba(255,255,255,0.8)'; ctx.lineJoin='round'; ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.9)';
+  starPath(0,-r*0.05,r*0.4,r*0.17,5); ctx.fill();
+}
+
+// ===== Custom vector OBSTACLES (drawn centred at origin) =====
+function vecPlunger(r){
+  ctx.fillStyle='#a9763c'; roundRectPath(-r*0.11,-r*1.02,r*0.22,r*1.15,r*0.08); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.12)'; roundRectPath(-r*0.11,-r*1.02,r*0.07,r*1.15,r*0.06); ctx.fill();
+  ctx.fillStyle='#d8473f';
+  ctx.beginPath(); ctx.moveTo(-r*0.52,r*0.18); ctx.lineTo(r*0.52,r*0.18); ctx.lineTo(r*0.34,r*0.72); ctx.lineTo(-r*0.34,r*0.72); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#c23a33'; ctx.beginPath(); ctx.ellipse(0,r*0.72,r*0.34,r*0.12,0,0,6.28); ctx.fill();
+  ctx.fillStyle='#ec6056'; ctx.beginPath(); ctx.ellipse(0,r*0.18,r*0.52,r*0.16,0,0,6.28); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.22)'; ctx.beginPath(); ctx.ellipse(-r*0.2,r*0.34,r*0.1,r*0.18,0.2,0,6.28); ctx.fill();
+}
+function vecSponge(r){
+  roundRectPath(-r*0.9,-r*0.55,r*1.8,r*1.1,r*0.2); ctx.fillStyle='#f4d23a'; ctx.fill();
+  ctx.save(); roundRectPath(-r*0.9,-r*0.55,r*1.8,r*1.1,r*0.2); ctx.clip();
+  ctx.fillStyle='#3fae5a'; ctx.fillRect(-r*0.9,-r*0.55,r*1.8,r*0.42);
+  ctx.fillStyle='rgba(150,110,12,0.4)';
+  [[-0.45,0.18],[-0.05,0.34],[0.4,0.12],[-0.25,0.42],[0.2,0.46],[0.55,0.36]].forEach(p=>{ctx.beginPath();ctx.arc(p[0]*r,p[1]*r,r*0.1,0,6.28);ctx.fill();});
+  ctx.restore();
+  ctx.fillStyle='rgba(255,255,255,0.25)'; roundRectPath(-r*0.78,-r*0.46,r*0.6,r*0.12,r*0.06); ctx.fill();
+}
+function vecBrush(r){
+  ctx.fillStyle='#4db6e0'; roundRectPath(-r*0.12,-r*0.95,r*0.24,r*1.4,r*0.1); ctx.fill();
+  ctx.fillStyle='#3aa0cc'; roundRectPath(-r*0.2,r*0.34,r*0.4,r*0.34,r*0.08); ctx.fill();
+  ctx.fillStyle='#eef6fa';
+  for(let i=-2;i<=2;i++){ roundRectPath(i*r*0.13-r*0.045, r*0.55, r*0.09, r*0.34, r*0.04); ctx.fill(); }
+  ctx.fillStyle='rgba(255,255,255,0.3)'; roundRectPath(-r*0.06,-r*0.88,r*0.06,r*1.1,r*0.03); ctx.fill();
+}
+function vecDuck(r){
+  ctx.fillStyle='#ffd23a';
+  ctx.beginPath(); ctx.ellipse(-r*0.05,r*0.28,r*0.82,r*0.52,0,0,6.28); ctx.fill();           // body
+  ctx.beginPath(); ctx.moveTo(-r*0.7,r*0.15); ctx.quadraticCurveTo(-r*1.05,-r*0.15,-r*0.55,r*0.32); ctx.closePath(); ctx.fill(); // tail
+  ctx.beginPath(); ctx.arc(r*0.45,-r*0.28,r*0.44,0,6.28); ctx.fill();                          // head
+  ctx.fillStyle='#f3c01f'; ctx.beginPath(); ctx.ellipse(-r*0.05,r*0.42,r*0.7,r*0.22,0,0,6.28); ctx.fill(); // belly shade
+  ctx.fillStyle='#ff9a2e'; ctx.beginPath(); ctx.moveTo(r*0.82,-r*0.34); ctx.lineTo(r*1.2,-r*0.2); ctx.lineTo(r*0.82,-r*0.08); ctx.closePath(); ctx.fill(); // beak
+  ctx.fillStyle='#26201a'; ctx.beginPath(); ctx.arc(r*0.55,-r*0.36,r*0.075,0,6.28); ctx.fill(); // eye
+  ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.ellipse(r*0.2,r*0.12,r*0.26,r*0.13,-0.4,0,6.28); ctx.fill();
+}
+function vecPaper(r){
+  ctx.fillStyle='#eef1f4'; roundRectPath(-r*0.5,-r*0.05,r*0.5,r*1.05,r*0.05); ctx.fill();   // hanging sheet
+  ctx.fillStyle='#ffffff'; roundRectPath(-r*0.62,-r*0.72,r*1.24,r*0.95,r*0.2); ctx.fill();  // roll
+  ctx.fillStyle='rgba(0,0,0,0.06)'; roundRectPath(-r*0.62,-r*0.05,r*1.24,r*0.28,r*0.12); ctx.fill();
+  ctx.fillStyle='#d6dce1'; ctx.beginPath(); ctx.ellipse(0,-r*0.24,r*0.22,r*0.4,0,0,6.28); ctx.fill();
+  ctx.fillStyle='#b6bdc4'; ctx.beginPath(); ctx.ellipse(0,-r*0.24,r*0.1,r*0.22,0,0,6.28); ctx.fill();
+}
+function drawObstacle(o){
+  ctx.save();
+  ctx.translate(o.x,o.y); ctx.rotate(o.rot||0);
+  ctx.shadowColor='rgba(0,18,28,0.30)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4;
+  switch(o.type){
+    case 'plunger': vecPlunger(o.r); break;
+    case 'sponge':  vecSponge(o.r); break;
+    case 'brush':   vecBrush(o.r); break;
+    case 'duck':    vecDuck(o.r); break;
+    default:        vecPaper(o.r); break;
+  }
+  ctx.restore();
+}
 
 // Custom vector SUPERHERO poop — flowing cape, domino mask, chest star, glossy body.
 // r = half-width unit. lean (-1..1) tilts the cape with movement; t = time for flutter.
@@ -700,31 +817,32 @@ function render(){
   vg.addColorStop(1,'rgba(4,14,38,0.30)');
   ctx.fillStyle=vg; ctx.fillRect(-40,-40,W+80,H+80);
 
-  // items — bright glow hugging each emoji (corn=yellow, shield=cyan)
+  // items — soft glow + crisp vector art (corn / star = warm, shield = cyan)
   for(const it of items){
-    const s = it.r*2*(1+Math.sin(it.bob)*0.07);
     const yy = it.y+Math.sin(it.bob)*3;
-    ctx.save();
-    if(it.kind==='shield'){
-      // pulsing cyan ring so the power-up stands out
+    const sc = 1+Math.sin(it.bob)*0.06;
+    const isShield = it.kind==='shield';
+    // soft glow behind
+    const gcol = isShield ? '120,225,255' : (it.golden ? '255,232,110' : '255,216,60');
+    const gr = it.r*1.85;
+    const gl = ctx.createRadialGradient(it.x,yy,0,it.x,yy,gr);
+    gl.addColorStop(0,'rgba('+gcol+',0.5)'); gl.addColorStop(0.6,'rgba('+gcol+',0.16)'); gl.addColorStop(1,'rgba('+gcol+',0)');
+    ctx.fillStyle=gl; ctx.beginPath(); ctx.arc(it.x,yy,gr,0,6.28); ctx.fill();
+    if(isShield){
       const pulse=0.5+0.5*Math.sin(it.bob*1.5);
-      ctx.strokeStyle='rgba(143,227,255,'+(0.5+pulse*0.4)+')'; ctx.lineWidth=3;
-      ctx.beginPath(); ctx.arc(it.x,yy,it.r*1.25+pulse*4,0,6.28); ctx.stroke();
-      ctx.shadowColor='rgba(120,220,255,0.95)'; ctx.shadowBlur=20;
-    } else {
-      ctx.shadowColor = it.golden ? 'rgba(255,236,120,0.95)' : 'rgba(255,222,60,0.9)';
-      ctx.shadowBlur = it.golden ? 18 : 13;
+      ctx.strokeStyle='rgba(150,232,255,'+(0.45+pulse*0.4)+')'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(it.x,yy,it.r*1.2+pulse*4,0,6.28); ctx.stroke();
     }
-    drawEmoji(it.e,it.x,yy,s,0,1,1);
-    drawEmoji(it.e,it.x,yy,s,0,1,1);
+    ctx.save();
+    ctx.translate(it.x,yy); ctx.scale(sc,sc);
+    if(it.kind==='corn') vecCorn(it.r);
+    else if(it.kind==='star') vecStar(it.r);
+    else vecShield(it.r);
     ctx.restore();
   }
 
-  // obstacles
-  for(const o of obstacles){
-    ctx.save(); ctx.shadowColor='rgba(0,0,0,0.4)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4;
-    drawEmoji(o.e,o.x,o.y,o.r*2,o.rot,1,1); ctx.restore();
-  }
+  // obstacles — crisp vector art
+  for(const o of obstacles){ drawObstacle(o); }
 
   // player — custom vector SUPERHERO poop (caped, masked, glossy)
   if(state===STATE.PLAY || state===STATE.OVER){
@@ -790,6 +908,7 @@ function frameLoop(now){
 
 // menu idle render
 reset();
+gameReady = true; // safe now: player/state exist, so resize() can reposition them
 requestAnimationFrame(frameLoop);
 
 })();
