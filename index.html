@@ -16,11 +16,36 @@
   .overlay {
     position:absolute; inset:0; display:flex; flex-direction:column;
     align-items:center; justify-content:center; text-align:center;
-    color:#fff; padding:24px; z-index:10;
-    background:radial-gradient(ellipse at center, rgba(60,35,18,.55), rgba(15,8,4,.92));
+    color:#fff; padding:24px 24px 32px; z-index:10;
+    background:radial-gradient(ellipse at center, rgba(20,40,70,.55), rgba(6,14,30,.93));
     backdrop-filter:blur(2px);
+    overflow-y:auto;
   }
   .hidden { display:none !important; }
+
+  /* Leaderboard */
+  .leaderboard { width:100%; max-width:330px; margin:16px auto 2px; }
+  .leaderboard:empty { display:none; }
+  .lb-head { font-size:15px; font-weight:800; color:#ffd98a; margin-bottom:8px; letter-spacing:.5px; }
+  .lb-row { display:flex; align-items:center; gap:10px; padding:8px 13px; margin:5px 0;
+    background:rgba(255,255,255,.08); border-radius:13px; font-weight:700; font-size:16px; }
+  .lb-rank { font-size:18px; width:26px; text-align:center; flex:none; }
+  .lb-name { flex:1; text-align:right; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lb-depth { color:#ffd98a; font-weight:800; flex:none; }
+  .lb-row.me { background:rgba(255,212,90,.25); box-shadow:inset 0 0 0 1.5px rgba(255,212,90,.6); animation:pulse .7s ease-in-out 2; }
+
+  /* Name entry */
+  .name-entry { width:100%; max-width:330px; margin-top:16px; padding:14px; border-radius:16px;
+    background:rgba(255,210,90,.12); border:1px solid rgba(255,210,90,.4); }
+  .ne-title { font-size:16px; font-weight:800; color:#ffe08a; margin-bottom:10px; }
+  .ne-row { display:flex; gap:8px; }
+  #name-input { flex:1; min-width:0; padding:12px 14px; border-radius:12px; border:none; font-size:17px;
+    font-family:inherit; text-align:right; background:#fff; color:#3a2008; font-weight:700; outline:none; }
+  .btn-mini { flex:none; padding:0 22px; border:none; border-radius:12px; font-weight:900; font-size:16px;
+    color:#3a2008; background:linear-gradient(#ffe08a,#ffb43f); box-shadow:0 4px 0 #c97d1a; cursor:pointer;
+    touch-action:manipulation; }
+  .btn-mini:active { transform:translateY(3px); box-shadow:0 1px 0 #c97d1a; }
+  .kbd-hint { font-size:.85em; color:#bfe3df; }
 
   .title { font-size:clamp(38px,13vw,72px); font-weight:900; letter-spacing:-1px;
     text-shadow:0 4px 0 #6b3d18, 0 8px 18px rgba(0,0,0,.6); line-height:.95; }
@@ -81,9 +106,11 @@
   <button class="btn" id="play-btn">לְשַׁחְרֵר! 🚀</button>
   <div class="hint">
     גְּרֹר את האצבע <b>ימינה ושמאלה</b> כדי לתמרן<br>
+    <span class="kbd-hint">במחשב: חיצים <b>← →</b></span><br>
     אֱסֹף <b>🌽 תירס</b> · חֲמֹק מ-<b>🪠 מכשולים</b><br>
     כמה עמוק תצליח לצלול? 🏆
   </div>
+  <div id="lb-start" class="leaderboard"></div>
   <div class="credit">משחק לרגעים הגדולים של היום 😌</div>
 </div>
 
@@ -92,8 +119,17 @@
   <div class="emoji-big" id="over-emoji">😵</div>
   <div class="score-line">צללת לעומק של</div>
   <div class="big-score"><span id="final-depth">0</span> מ׳</div>
-  <div class="score-line" style="font-size:18px;margin-top:8px;opacity:.9">🌽 <span id="final-corn">0</span> · ניקוד <span id="final-score">0</span></div>
-  <div class="best" id="best-line">שיא: 0 מ׳</div>
+  <div class="score-line" style="font-size:16px;margin-top:6px;opacity:.9">🌽 <span id="final-corn">0</span> · ניקוד <span id="final-score">0</span></div>
+
+  <div id="name-entry" class="name-entry hidden">
+    <div class="ne-title">🏆 נכנסת לטבלת השיאים!</div>
+    <div class="ne-row">
+      <input id="name-input" type="text" maxlength="12" placeholder="רשמו את השם שלכם" autocomplete="off">
+      <button class="btn-mini" id="save-name">שמור</button>
+    </div>
+  </div>
+
+  <div id="lb-over" class="leaderboard"></div>
   <button class="btn" id="again-btn">עוֹד פַּעַם! 🔁</button>
 </div>
 
@@ -146,6 +182,10 @@ const depthEl = document.getElementById('depth');
 const cornEl  = document.getElementById('corn');
 const comboEl = document.getElementById('combo');
 const comboNEl= document.getElementById('combo-n');
+const nameEntry = document.getElementById('name-entry');
+const nameInput = document.getElementById('name-input');
+const lbOverEl  = document.getElementById('lb-over');
+const lbStartEl = document.getElementById('lb-start');
 
 let player, obstacles, items, particles, bubbles, bokeh;
 let scrollY, speed, depthM, corn, score, comboTimer, comboMult, spawnAcc, itemAcc;
@@ -153,7 +193,34 @@ let shake, flashHit, lastTime, frame;
 let targetX; // finger target
 
 const BEST_KEY = 'plop_best_depth_v1';
+const LB_KEY = 'plop_leaderboard_v1';
+const LASTNAME_KEY = 'plop_last_name';
 let best = parseInt(localStorage.getItem(BEST_KEY)||'0',10) || 0;
+
+// ---------- Leaderboard (local top-5 with names) ----------
+function loadLB(){ try{ const a=JSON.parse(localStorage.getItem(LB_KEY)||'[]'); return Array.isArray(a)?a.filter(e=>e&&typeof e.depth==='number'):[]; }catch(e){ return []; } }
+let leaderboard = loadLB();
+if(!leaderboard.length && best>0) leaderboard=[{name:'אלוף', depth:best}]; // migrate old single best
+function saveLB(){
+  leaderboard.sort((a,b)=>b.depth-a.depth);
+  leaderboard=leaderboard.slice(0,5);
+  localStorage.setItem(LB_KEY, JSON.stringify(leaderboard));
+  best = leaderboard.length?leaderboard[0].depth:0;
+  localStorage.setItem(BEST_KEY, String(best));
+}
+function qualifies(d){ return d>0 && (leaderboard.length<5 || d>leaderboard[leaderboard.length-1].depth); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function renderLB(el, hi){
+  if(!el) return;
+  if(!leaderboard.length){ el.innerHTML=''; return; }
+  const medals=['🥇','🥈','🥉','4️⃣','5️⃣'];
+  el.innerHTML='<div class="lb-head">🏆 טבלת השיאים</div>'+leaderboard.map(function(e,i){
+    const me = hi && e.name===hi.name && e.depth===hi.depth ? ' me':'';
+    return '<div class="lb-row'+me+'"><span class="lb-rank">'+(medals[i]||(i+1))+'</span>'+
+           '<span class="lb-name">'+escapeHtml(e.name)+'</span>'+
+           '<span class="lb-depth">'+e.depth+' מ׳</span></div>';
+  }).join('');
+}
 
 function reset(){
   const pr = playerRadius();
@@ -241,31 +308,65 @@ canvas.addEventListener('mousedown',down);
 window.addEventListener('mousemove',move);
 window.addEventListener('mouseup',up);
 
+// keyboard steering (desktop): arrows or A/D
+const keys = { left:false, right:false };
+window.addEventListener('keydown', function(e){
+  const inInput = document.activeElement && document.activeElement.tagName==='INPUT';
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A'){ keys.left=true; if(!inInput) e.preventDefault(); }
+  else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D'){ keys.right=true; if(!inInput) e.preventDefault(); }
+  else if((e.key==='Enter'||e.key===' ') && state!==STATE.PLAY && !inInput){ e.preventDefault(); startGame(); }
+});
+window.addEventListener('keyup', function(e){
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') keys.left=false;
+  else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') keys.right=false;
+});
+
 // ---------- Flow ----------
+let pendingEntry = null; // qualifying score awaiting a name
 function startGame(){
+  if(pendingEntry) commitName();     // don't lose an unsaved qualifying score
   audio(); sStart();
   reset();
   state=STATE.PLAY;
   startEl.classList.add('hidden');
   overEl.classList.add('hidden');
+  nameEntry.classList.add('hidden');
   hud.classList.remove('hidden');
+  keys.left=keys.right=false;
   lastTime=performance.now();
 }
 function gameOver(){
   sHit();
   state=STATE.OVER;
   if(navigator.vibrate) navigator.vibrate(120);
-  const newBest = depthM>best;
-  if(newBest){ best=depthM; localStorage.setItem(BEST_KEY,String(best)); }
   document.getElementById('final-depth').textContent=depthM;
   document.getElementById('final-corn').textContent=corn;
   document.getElementById('final-score').textContent=score;
-  const bl=document.getElementById('best-line');
-  bl.innerHTML = newBest ? '🏆 שיא חדש! '+best+' מ׳' : 'שיא: '+best+' מ׳';
-  bl.className = 'best'+(newBest?' newbest':'');
-  document.getElementById('over-emoji').textContent = newBest?'🥳':'😵';
+  const q = qualifies(depthM);
+  pendingEntry = q ? { depth:depthM } : null;
+  if(q){
+    nameInput.value = localStorage.getItem(LASTNAME_KEY) || '';
+    nameEntry.classList.remove('hidden');
+    document.getElementById('over-emoji').textContent = '🦸';
+  } else {
+    nameEntry.classList.add('hidden');
+    document.getElementById('over-emoji').textContent = '😵';
+  }
+  renderLB(lbOverEl);
   hud.classList.add('hidden');
   setTimeout(()=>overEl.classList.remove('hidden'), 380);
+}
+function commitName(){
+  if(!pendingEntry) return;
+  const name = (nameInput.value||'').trim().slice(0,12) || 'אנונימי';
+  localStorage.setItem(LASTNAME_KEY, name);
+  const entry = { name, depth: pendingEntry.depth };
+  leaderboard.push(entry); saveLB();
+  pendingEntry = null;
+  nameEntry.classList.add('hidden');
+  if(nameInput.blur) nameInput.blur();
+  renderLB(lbOverEl, entry); renderLB(lbStartEl);
+  beep(660,0.12,'triangle',0.16); setTimeout(()=>beep(880,0.14,'triangle',0.16),90);
 }
 // Robust tap binding: works on touch (touchend) AND mouse/desktop (click),
 // deduped so a single tap never triggers twice.
@@ -276,6 +377,9 @@ function bindTap(el, fn){
 }
 bindTap(document.getElementById('play-btn'), startGame);
 bindTap(document.getElementById('again-btn'), startGame);
+bindTap(document.getElementById('save-name'), commitName);
+nameInput.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); commitName(); } });
+renderLB(lbStartEl); // show standings on the menu
 
 // ---------- Update ----------
 function update(dt){
@@ -288,15 +392,21 @@ function update(dt){
   depthM = Math.floor(scrollY/45);
   depthEl.textContent = depthM;
 
-  // player horizontal follow (smooth)
+  // steering: keyboard nudges the target; pointer drag sets it directly
   const pr = playerRadius(); player.r=pr;
-  const tx = Math.max(pr, Math.min(W-pr, targetX));
-  const dx = tx - player.x;
-  player.vx = dx*10;
-  player.x += player.vx*dt;
+  if(keys.left||keys.right){
+    const step = W*1.8*dt;
+    if(keys.left)  targetX -= step;
+    if(keys.right) targetX += step;
+  }
+  targetX = Math.max(pr, Math.min(W-pr, targetX));
+  // smooth, snappy follow (critically-damped feel)
+  const prevX = player.x;
+  player.x += (targetX - player.x) * Math.min(1, 14*dt);
   player.x = Math.max(pr, Math.min(W-pr, player.x));
-  player.rot = Math.max(-0.5,Math.min(0.5, player.vx*0.0012));
-  player.squish += ((1) - player.squish)*Math.min(1,dt*8);
+  player.vx = dt>0 ? (player.x - prevX)/dt : 0;
+  player.rot = Math.max(-0.5, Math.min(0.5, player.vx*0.0011));
+  player.squish += (1 - player.squish)*Math.min(1,dt*8);
 
   // spawn pacing scales with speed
   spawnAcc += dt;
@@ -376,9 +486,21 @@ function drawEmoji(e, x, y, size, rot, sx, sy){
   ctx.restore();
 }
 
-// Custom vector poop character — soft swirl body, glossy sheen, big cute eyes.
-// r = half-width unit. Drawn centred on (x,y).
-function drawPoop(x,y,r,rot,sx,sy){
+function starPath(cx,cy,ro,ri,pts){
+  ctx.beginPath();
+  for(let i=0;i<pts*2;i++){
+    const ang=(Math.PI/pts)*i - Math.PI/2;
+    const rad=i%2?ri:ro;
+    const px=cx+Math.cos(ang)*rad, py=cy+Math.sin(ang)*rad;
+    i?ctx.lineTo(px,py):ctx.moveTo(px,py);
+  }
+  ctx.closePath();
+}
+
+// Custom vector SUPERHERO poop — flowing cape, domino mask, chest star, glossy body.
+// r = half-width unit. lean (-1..1) tilts the cape with movement; t = time for flutter.
+function drawPoop(x,y,r,rot,sx,sy,lean,t){
+  lean=lean||0; t=t||0;
   ctx.save();
   ctx.translate(x,y);
   if(rot) ctx.rotate(rot);
@@ -387,55 +509,104 @@ function drawPoop(x,y,r,rot,sx,sy){
   // contact shadow
   ctx.save();
   ctx.fillStyle='rgba(4,16,30,0.22)';
-  ctx.beginPath(); ctx.ellipse(0, r*0.96, r*0.92, r*0.24, 0, 0, 6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, r*0.98, r*0.92, r*0.24, 0, 0, 6.28); ctx.fill();
   ctx.restore();
 
-  // body gradient (warm, dimensional)
+  // ---- CAPE (behind the body) — wide flowing wings + scalloped hem, flutters w/ motion ----
+  const sway = -lean*0.55*r + Math.sin(t*4)*0.07*r;
+  const flap = Math.sin(t*4+1)*0.07*r;
+  const cg=ctx.createLinearGradient(0,-r*0.4,0,r*1.35);
+  cg.addColorStop(0,'#ee4458'); cg.addColorStop(1,'#a81832');
+  ctx.fillStyle=cg;
+  ctx.beginPath();
+  ctx.moveTo(-r*0.40,-r*0.36);                                       // left shoulder
+  ctx.quadraticCurveTo(-r*1.34+sway, r*0.22, -r*1.06+sway, r*0.98+flap); // flare out left wing
+  ctx.quadraticCurveTo(-r*0.82+sway, r*1.34, -r*0.54+sway, r*1.06);  // scalloped hem
+  ctx.quadraticCurveTo(-r*0.27+sway, r*1.34+flap, 0+sway, r*1.08);
+  ctx.quadraticCurveTo(r*0.27+sway, r*1.34, r*0.54+sway, r*1.06);
+  ctx.quadraticCurveTo(r*0.82+sway, r*1.34, r*1.06+sway, r*0.98);    // right wing
+  ctx.quadraticCurveTo(r*1.34+sway, r*0.22, r*0.40,-r*0.36);         // up to right shoulder
+  ctx.closePath(); ctx.fill();
+  // cape inner fold shade
+  ctx.fillStyle='rgba(120,12,34,0.30)';
+  ctx.beginPath();
+  ctx.moveTo(-r*0.34,-r*0.2);
+  ctx.quadraticCurveTo(-r*0.2+sway, r*0.6, 0+sway, r*1.0);
+  ctx.quadraticCurveTo(r*0.2+sway, r*0.6, r*0.34,-r*0.2);
+  ctx.closePath(); ctx.fill();
+  // little collar so the cape reads as "attached"
+  ctx.fillStyle='#c92038';
+  ctx.beginPath();
+  ctx.moveTo(-r*0.46,-r*0.34); ctx.quadraticCurveTo(0,-r*0.16, r*0.46,-r*0.34);
+  ctx.quadraticCurveTo(r*0.2,-r*0.5, 0,-r*0.46); ctx.quadraticCurveTo(-r*0.2,-r*0.5,-r*0.46,-r*0.34);
+  ctx.closePath(); ctx.fill();
+
+  // ---- BODY ----
   const grd=ctx.createLinearGradient(0,-r*1.05,0,r*1.05);
   grd.addColorStop(0,'#c08a55');
   grd.addColorStop(0.45,'#9c6738');
   grd.addColorStop(1,'#5f3c1e');
   ctx.fillStyle=grd;
   const blob=(cx,cy,rx,ry)=>{ ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,6.28); ctx.fill(); };
-  blob(0,  r*0.55, r*1.00, r*0.58);   // bottom tier
-  blob(0,  r*0.05, r*0.74, r*0.52);   // middle tier
-  blob(0, -r*0.42, r*0.47, r*0.45);   // top tier
-  // swirl tip
+  blob(0,  r*0.55, r*1.00, r*0.58);
+  blob(0,  r*0.05, r*0.74, r*0.52);
+  blob(0, -r*0.42, r*0.47, r*0.45);
   ctx.beginPath();
   ctx.moveTo(-r*0.17,-r*0.55);
   ctx.quadraticCurveTo(-r*0.05,-r*1.06, r*0.20,-r*0.74);
   ctx.quadraticCurveTo(r*0.26,-r*0.58, r*0.17,-r*0.5);
   ctx.closePath(); ctx.fill();
 
-  // glossy sheen highlights (upper-left)
+  // sheen
   ctx.fillStyle='rgba(255,228,188,0.30)';
-  ctx.beginPath(); ctx.ellipse(-r*0.34, r*0.42, r*0.30, r*0.16, -0.5, 0, 6.28); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(-r*0.20,-r*0.10, r*0.18, r*0.10, -0.5, 0, 6.28); ctx.fill();
-  // subtle rim light on the right
+  ctx.beginPath(); ctx.ellipse(-r*0.34, r*0.40, r*0.30, r*0.16, -0.5, 0, 6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-r*0.22,-r*0.12, r*0.16, r*0.10, -0.5, 0, 6.28); ctx.fill();
   ctx.fillStyle='rgba(255,210,160,0.16)';
   ctx.beginPath(); ctx.ellipse(r*0.5, r*0.5, r*0.12, r*0.34, 0.2, 0, 6.28); ctx.fill();
 
-  // eyes (white) — looking slightly down = cute
+  // ---- CHEST EMBLEM (star) ----
+  starPath(0, r*0.55, r*0.24, r*0.10, 5);
+  ctx.fillStyle='rgba(255,255,255,0.95)'; ctx.fill();
+  starPath(0, r*0.55, r*0.18, r*0.075, 5);
+  ctx.fillStyle='#ffce32'; ctx.fill();
+
+  // ---- DOMINO MASK (behind eyes) ----
   const ey=-r*0.16, ex=r*0.27, eR=r*0.21;
+  const mg=ctx.createLinearGradient(0,ey-eR,0,ey+eR);
+  mg.addColorStop(0,'#3a55d8'); mg.addColorStop(1,'#243aa6');
+  ctx.fillStyle=mg;
+  ctx.beginPath();
+  ctx.ellipse(-ex, ey, eR*1.32, eR*1.24, -0.12, 0, 6.28);
+  ctx.ellipse( ex, ey, eR*1.32, eR*1.24,  0.12, 0, 6.28);
+  ctx.fill();
+  // center point of the mask
+  ctx.beginPath();
+  ctx.moveTo(-r*0.06, ey+eR*0.2); ctx.lineTo(0, ey+eR*0.95); ctx.lineTo(r*0.06, ey+eR*0.2);
+  ctx.closePath(); ctx.fill();
+  // mask sheen
+  ctx.fillStyle='rgba(255,255,255,0.18)';
+  ctx.beginPath(); ctx.ellipse(-ex-eR*0.3, ey-eR*0.55, eR*0.5, eR*0.2, -0.3,0,6.28); ctx.fill();
+
+  // ---- EYES (white, on top of mask) ----
   ctx.fillStyle='#fff';
-  ctx.beginPath(); ctx.ellipse(-ex,ey,eR,eR*1.14,0,0,6.28); ctx.fill();
-  ctx.beginPath(); ctx.ellipse( ex,ey,eR,eR*1.14,0,0,6.28); ctx.fill();
-  const pr=eR*0.52, pyo=eR*0.34;
+  ctx.beginPath(); ctx.ellipse(-ex,ey,eR*0.78,eR*0.92,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( ex,ey,eR*0.78,eR*0.92,0,0,6.28); ctx.fill();
+  const pr=eR*0.46, pyo=eR*0.26;
   ctx.fillStyle='#241a12';
   ctx.beginPath(); ctx.arc(-ex, ey+pyo, pr,0,6.28); ctx.fill();
   ctx.beginPath(); ctx.arc( ex, ey+pyo, pr,0,6.28); ctx.fill();
   ctx.fillStyle='rgba(255,255,255,0.95)';
-  ctx.beginPath(); ctx.arc(-ex-pr*0.45, ey+pyo-pr*0.5, pr*0.42,0,6.28); ctx.fill();
-  ctx.beginPath(); ctx.arc( ex-pr*0.45, ey+pyo-pr*0.5, pr*0.42,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.arc(-ex-pr*0.4, ey+pyo-pr*0.5, pr*0.4,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.arc( ex-pr*0.4, ey+pyo-pr*0.5, pr*0.4,0,6.28); ctx.fill();
 
-  // smile
-  ctx.strokeStyle='#3a2414'; ctx.lineWidth=r*0.075; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(-r*0.21, r*0.22); ctx.quadraticCurveTo(0, r*0.46, r*0.21, r*0.22); ctx.stroke();
+  // ---- confident grin ----
+  ctx.strokeStyle='#3a2414'; ctx.lineWidth=r*0.08; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-r*0.22, r*0.18); ctx.quadraticCurveTo(0, r*0.44, r*0.22, r*0.18); ctx.stroke();
 
   // rosy cheeks
-  ctx.fillStyle='rgba(255,135,120,0.30)';
-  ctx.beginPath(); ctx.ellipse(-r*0.45, r*0.08, r*0.12, r*0.075,0,0,6.28); ctx.fill();
-  ctx.beginPath(); ctx.ellipse( r*0.45, r*0.08, r*0.12, r*0.075,0,0,6.28); ctx.fill();
+  ctx.fillStyle='rgba(255,135,120,0.28)';
+  ctx.beginPath(); ctx.ellipse(-r*0.46, r*0.10, r*0.11, r*0.07,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( r*0.46, r*0.10, r*0.11, r*0.07,0,0,6.28); ctx.fill();
 
   ctx.restore();
 }
@@ -491,16 +662,18 @@ function render(){
     drawEmoji(o.e,o.x,o.y,o.r*2,o.rot,1,1); ctx.restore();
   }
 
-  // player — custom vector poop hero (modern, glossy, expressive)
+  // player — custom vector SUPERHERO poop (caped, masked, glossy)
   if(state===STATE.PLAY || state===STATE.OVER){
-    // motion trail (fading ghosts of the character)
+    const lean = Math.max(-1, Math.min(1, player.vx/(W*0.55)));
+    const t = frame*0.05;
+    // motion trail (fading ghosts)
     for(let i=4;i>=1;i--){
-      ctx.globalAlpha=0.07*(5-i);
-      drawPoop(player.x - player.vx*0.015*i, player.y - 10*i, player.r*(1-i*0.05), player.rot, 1, 1);
+      ctx.globalAlpha=0.06*(5-i);
+      drawPoop(player.x - player.vx*0.015*i, player.y - 10*i, player.r*(1-i*0.05), player.rot, 1, 1, lean*0.6, t);
     }
     ctx.globalAlpha=1;
     const sq=player.squish;
-    drawPoop(player.x, player.y, player.r, player.rot, 1/sq, sq);
+    drawPoop(player.x, player.y, player.r, player.rot, 1/sq, sq, lean, t);
   }
 
   // particles
