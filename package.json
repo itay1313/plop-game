@@ -1,0 +1,20 @@
+{
+  "name": "plop-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "פלופ! — a mobile arcade game: dive down the sewer as a poop hero",
+  "scripts": {
+    "build:web": "node scripts/build-web.js",
+    "sync": "npm run build:web && cap sync",
+    "ios:add": "npm run build:web && cap add ios && cap sync ios",
+    "ios:open": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/ios": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/assets": "^3.0.5"
+  }
+}

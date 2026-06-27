@@ -1,0 +1,10 @@
+{
+  "appId": "com.itay1313.plop",
+  "appName": "פלופ!",
+  "webDir": "www",
+  "backgroundColor": "#1a0f08",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#1a0f08"
+  }
+}
