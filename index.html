@@ -92,6 +92,13 @@
     font-size:clamp(34px,11vw,62px); font-weight:900; color:#fff; opacity:0; letter-spacing:-1px;
     text-shadow:0 3px 0 rgba(0,0,0,.35), 0 0 26px rgba(255,236,150,.7);
   }
+  #boss-bar { position:absolute; top:8px; left:0; right:0; z-index:5; text-align:center; pointer-events:none; }
+  .bb-label { font-size:clamp(15px,4.6vw,19px); font-weight:900; color:#ffd2d2;
+    text-shadow:0 2px 8px rgba(0,0,0,.7), 0 0 12px rgba(255,60,60,.5); margin-bottom:5px; }
+  .bb-track { width:58%; max-width:300px; height:14px; margin:0 auto; border-radius:10px;
+    background:rgba(20,4,8,.6); box-shadow:inset 0 0 0 2px rgba(255,255,255,.18); overflow:hidden; }
+  .bb-fill { height:100%; width:100%; border-radius:10px;
+    background:linear-gradient(#ff6b74,#d12838); transition:width .12s linear; }
   .levelup.show { animation:levelpop 1.5s ease-out forwards; }
   @keyframes levelpop {
     0%   { opacity:0; transform:scale(.5) translateY(14px); }
@@ -116,6 +123,10 @@
   </div>
 </div>
 <div id="levelup" class="levelup"></div>
+<div id="boss-bar" class="hidden">
+  <div class="bb-label">👑 קַקִי הָעֲנָק</div>
+  <div class="bb-track"><div id="bb-fill" class="bb-fill"></div></div>
+</div>
 
 <!-- מסך פתיחה -->
 <div id="start" class="overlay">
@@ -198,6 +209,8 @@ function sHit(){ beep(140,0.18,'sawtooth',0.22); setTimeout(()=>beep(90,0.25,'sq
 function sSmash(){ beep(320,0.08,'square',0.18); setTimeout(()=>beep(180,0.12,'sawtooth',0.16),40); }
 function sPower(){ beep(440,0.1,'triangle',0.18); setTimeout(()=>beep(660,0.1,'triangle',0.18),80); setTimeout(()=>beep(880,0.14,'triangle',0.18),160); }
 function sLevelUp(){ beep(523,0.12,'triangle',0.18); setTimeout(()=>beep(659,0.12,'triangle',0.18),95); setTimeout(()=>beep(784,0.14,'triangle',0.2),190); setTimeout(()=>beep(1047,0.22,'triangle',0.18),300); }
+function sBoss(){ beep(110,0.3,'sawtooth',0.2); setTimeout(()=>beep(82,0.4,'sawtooth',0.2),200); setTimeout(()=>beep(65,0.5,'square',0.18),460); }
+function sBossDie(){ beep(180,0.15,'square',0.2); setTimeout(()=>beep(120,0.2,'sawtooth',0.2),120); setTimeout(()=>beep(70,0.5,'sawtooth',0.22),260); }
 function sStart(){ beep(330,0.1,'triangle',0.16); setTimeout(()=>beep(550,0.14,'triangle',0.16),90); }
 function sPlop(){ beep(220,0.08,'sine',0.12); }
 
@@ -214,6 +227,8 @@ const comboEl = document.getElementById('combo');
 const comboNEl= document.getElementById('combo-n');
 const levelEl = document.getElementById('level');
 const levelupEl = document.getElementById('levelup');
+const bossBarEl = document.getElementById('boss-bar');
+const bbFillEl = document.getElementById('bb-fill');
 const nameEntry = document.getElementById('name-entry');
 const nameInput = document.getElementById('name-input');
 const lbOverEl  = document.getElementById('lb-over');
@@ -223,7 +238,11 @@ let player, obstacles, items, particles, bubbles, bokeh;
 let scrollY, speed, depthM, corn, score, comboTimer, comboMult, spawnAcc, itemAcc;
 let shieldTimer, powerAcc, flashGood;
 let level, lastLevel;
+let boss, projectiles, bossTriggered, bossTimer;
 const LEVEL_SIZE = 50; // metres per stage
+const BOSS_DEPTH = 200;     // the Giant Poop boss appears here
+const BOSS_DURATION = 14;   // seconds to survive the fight
+function bossRadius(){ return Math.min(W,H)*0.16; }
 // each stage has its own colour "zone"; the background morphs between them as you descend
 const PALETTES = [
   ['#36cabb','#1ba6ab','#0e7d8c'], // 1 · teal
@@ -276,6 +295,7 @@ function reset(){
   comboTimer=0; comboMult=1; spawnAcc=0; itemAcc=0;
   shieldTimer=0; powerAcc=0; flashGood=0;
   level=1; lastLevel=1;
+  boss=null; projectiles=[]; bossTriggered=false; bossTimer=0;
   shake=0; flashHit=0; frame=0;
   for(let i=0;i<16;i++) bubbles.push(newBubble(Math.random()*H));
   for(let i=0;i<7;i++) bokeh.push(newBokeh(Math.random()*H));
@@ -389,6 +409,7 @@ function startGame(){
   overEl.classList.add('hidden');
   nameEntry.classList.add('hidden');
   levelupEl.classList.remove('show'); levelEl.textContent='1';
+  bossBarEl.classList.add('hidden');
   hud.classList.remove('hidden');
   keys.left=keys.right=false;
   lastTime=performance.now();
@@ -396,6 +417,7 @@ function startGame(){
 function gameOver(){
   sHit();
   state=STATE.OVER;
+  bossBarEl.classList.add('hidden');
   if(navigator.vibrate) navigator.vibrate(120);
   document.getElementById('final-depth').textContent=depthM;
   document.getElementById('final-corn').textContent=corn;
@@ -437,6 +459,78 @@ function levelUp(lv){
   if(navigator.vibrate) navigator.vibrate(35);
 }
 
+// ---------- BOSS: the Giant Poop ----------
+function banner(txt){
+  levelupEl.textContent = txt;
+  levelupEl.classList.remove('show'); void levelupEl.offsetWidth;
+  levelupEl.classList.add('show');
+}
+function startBoss(){
+  bossTriggered = true;
+  obstacles.length = 0; items.length = 0; projectiles.length = 0; // clear the arena
+  boss = { x:W/2, y:-bossRadius()*1.4, intro:1.1, sway:0, fireAcc:0, defeated:false, deathT:0 };
+  bossTimer = BOSS_DURATION;
+  bossBarEl.classList.remove('hidden'); bbFillEl.style.width='100%';
+  banner('👑 בּוֹס! קַקִי הָעֲנָק 💩');
+  shake = Math.max(shake, 12);
+  sBoss();
+  if(navigator.vibrate) navigator.vibrate([40,60,40]);
+}
+function fireBossAttack(){
+  const pr = playerRadius();
+  const phase = 1 - bossTimer/BOSS_DURATION;       // 0 → 1 as the fight goes on
+  const n = 1 + (phase>0.45 && Math.random()<0.6 ? 1 : 0);  // 1–2 projectiles, fair to dodge
+  const br = bossRadius();
+  for(let i=0;i<n;i++){
+    const tx = pr + Math.random()*(W-2*pr);          // aim at a spot to dodge
+    const vy = H*(0.42 + phase*0.12);
+    projectiles.push({
+      x: boss.x + (Math.random()-0.5)*br*0.6,
+      y: boss.y + br*0.55,
+      vx: (tx - boss.x)*0.55 + (Math.random()-0.5)*60,
+      vy: vy, r: pr*0.5, rot:Math.random()*6.28, spin:(Math.random()-0.5)*8
+    });
+  }
+  sSmash();
+}
+function updateBoss(dt){
+  const b = boss;
+  if(b.defeated){
+    b.deathT += dt;
+    b.y += 240*dt;                     // flushed away downward
+    b.sway += dt*22;
+    const frac = Math.max(0, 1 - b.deathT/1.4);
+    bbFillEl.style.width = (frac*0)+'%';
+    if(b.deathT > 1.5){
+      boss = null; projectiles.length = 0;
+      bossBarEl.classList.add('hidden');
+      score += 500; flashGood = 1;
+      banner('נִיצַּחְתָּ! 🎉 +500');
+      sLevelUp();
+    }
+    return;
+  }
+  if(b.intro > 0){                     // descend into the arena
+    b.y += ((H*0.19) - b.y) * Math.min(1, 3.5*dt);
+    b.intro -= dt;
+    return;                            // no attacks during the entrance
+  }
+  b.sway += dt;
+  b.x = W/2 + Math.sin(b.sway*1.1) * (W*0.30);
+  b.y = (H*0.19) + Math.sin(b.sway*2.2)*8;
+  b.fireAcc += dt;
+  if(b.fireAcc >= 0.95){ b.fireAcc = 0; fireBossAttack(); }
+  bossTimer -= dt;
+  bbFillEl.style.width = Math.max(0, bossTimer/BOSS_DURATION*100) + '%';
+  if(bossTimer <= 0){
+    b.defeated = true; b.deathT = 0;
+    shake = Math.max(shake, 16);
+    burst(b.x, b.y, '#8a5417', 46, 2.6); burst(b.x, b.y, '#ffd24a', 20, 1.6);
+    sBossDie();
+    if(navigator.vibrate) navigator.vibrate(120);
+  }
+}
+
 // Robust tap binding: works on touch (touchend) AND mouse/desktop (click),
 // deduped so a single tap never triggers twice.
 function bindTap(el, fn){
@@ -453,20 +547,21 @@ renderLB(lbStartEl); // show standings on the menu
 // ---------- Update ----------
 function update(dt){
   frame++;
-  // difficulty ramp — gentle start, speed keeps climbing as you descend (stages)
-  speed = H*0.26 + depthM*0.62;
-  if(speed>H*1.15) speed=H*1.15;
 
-  scrollY += speed*dt;
-  depthM = Math.floor(scrollY/45);
-  depthEl.textContent = depthM;
+  if(!boss){
+    // difficulty ramp — speed keeps climbing as you descend (stages)
+    speed = H*0.26 + depthM*0.62;
+    if(speed>H*1.15) speed=H*1.15;
+    scrollY += speed*dt;
+    depthM = Math.floor(scrollY/45);
+    depthEl.textContent = depthM;
 
-  // stage / level progression
-  level = Math.floor(depthM/LEVEL_SIZE)+1;
-  if(level !== lastLevel){
-    lastLevel = level;
-    levelEl.textContent = level;
-    levelUp(level);
+    // stage / level progression
+    level = Math.floor(depthM/LEVEL_SIZE)+1;
+    if(level !== lastLevel){ lastLevel=level; levelEl.textContent=level; levelUp(level); }
+
+    // the Giant Poop boss appears once, at BOSS_DEPTH
+    if(!bossTriggered && depthM>=BOSS_DEPTH) startBoss();
   }
 
   // steering: keyboard nudges the target; pointer drag sets it directly
@@ -484,16 +579,38 @@ function update(dt){
   player.vx = dt>0 ? (player.x - prevX)/dt : 0;
   player.rot = Math.max(-0.5, Math.min(0.5, player.vx*0.0011));
   player.squish += (1 - player.squish)*Math.min(1,dt*8);
+  // during the boss fight the hero drops to the lower arena (room to dodge); back up after
+  const pyTarget = boss ? H*0.64 : H*0.30;
+  player.y += (pyTarget - player.y) * Math.min(1, 4*dt);
 
-  // spawn pacing — gentle start, gets busier as the stages climb (always room to pass)
-  spawnAcc += dt;
-  const obsInterval = Math.max(0.6, 1.30 - depthM*0.0048);
-  if(spawnAcc>=obsInterval){ spawnAcc=0; spawnObstacle(); if(depthM>120 && Math.random()<0.3) spawnObstacle(); }
-  itemAcc += dt;
-  if(itemAcc>=0.55){ itemAcc=0; if(Math.random()<0.82) spawnItem(); }
-  // shield power-ups appear occasionally once you're a bit deeper
-  powerAcc += dt;
-  if(depthM>12 && powerAcc>=11){ powerAcc=0; if(Math.random()<0.85) spawnPower(); }
+  if(boss){
+    updateBoss(dt);
+  } else {
+    // spawn pacing — gentle start, gets busier with depth but stays fair & performant
+    spawnAcc += dt;
+    const obsInterval = Math.max(0.66, 1.30 - depthM*0.004);
+    if(spawnAcc>=obsInterval && obstacles.length<10){
+      spawnAcc=0; spawnObstacle();
+      if(depthM>170 && Math.random()<0.22) spawnObstacle();
+    }
+    itemAcc += dt;
+    if(itemAcc>=0.55){ itemAcc=0; if(Math.random()<0.82) spawnItem(); }
+    // shield power-ups appear occasionally once you're a bit deeper
+    powerAcc += dt;
+    if(depthM>12 && powerAcc>=11){ powerAcc=0; if(Math.random()<0.85) spawnPower(); }
+  }
+
+  // boss projectiles (the giant poop hurls little poops at you)
+  for(let i=projectiles.length-1;i>=0;i--){
+    const p=projectiles[i];
+    p.x += p.vx*dt; p.y += p.vy*dt; p.rot += p.spin*dt;
+    if(p.y > H+p.r*2 || p.x < -p.r*2 || p.x > W+p.r*2){ projectiles.splice(i,1); continue; }
+    const dxp=p.x-player.x, dyp=p.y-player.y, rrp=p.r*0.62+player.r*0.55;
+    if(dxp*dxp+dyp*dyp < rrp*rrp){
+      if(shieldTimer>0){ projectiles.splice(i,1); burst(p.x,p.y,'#8fe3ff',12,1.6); score+=20; sSmash(); continue; }
+      shake=18; burst(player.x,player.y,'#8a5417',24,2.0); gameOver(); return;
+    }
+  }
 
   // move obstacles up
   for(let i=obstacles.length-1;i>=0;i--){
@@ -705,7 +822,9 @@ function vecPaper(r){
 function drawObstacle(o){
   ctx.save();
   ctx.translate(o.x,o.y); ctx.rotate(o.rot||0);
-  ctx.shadowColor='rgba(0,18,28,0.30)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4;
+  // cheap drawn contact shadow (NO shadowBlur — that's far too costly per-fill on mobile)
+  ctx.fillStyle='rgba(0,16,26,0.16)';
+  ctx.beginPath(); ctx.ellipse(0, o.r*0.82, o.r*0.78, o.r*0.28, 0, 0, 6.28); ctx.fill();
   switch(o.type){
     case 'plunger': vecPlunger(o.r); break;
     case 'sponge':  vecSponge(o.r); break;
@@ -830,6 +949,81 @@ function drawPoop(x,y,r,rot,sx,sy,lean,t){
   ctx.restore();
 }
 
+// a little angry poop projectile that the boss throws
+function drawProjectile(p){
+  ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot||0);
+  const r=p.r;
+  const g=ctx.createLinearGradient(0,-r,0,r);
+  g.addColorStop(0,'#9c6738'); g.addColorStop(1,'#5f3c1e');
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.ellipse(0,r*0.25,r*0.95,r*0.7,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0,-r*0.3,r*0.55,r*0.5,0,0,6.28); ctx.fill();
+  // angry little eyes
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.arc(-r*0.28,0,r*0.2,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.arc( r*0.28,0,r*0.2,0,6.28); ctx.fill();
+  ctx.fillStyle='#241a12';
+  ctx.beginPath(); ctx.arc(-r*0.26,r*0.04,r*0.1,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.arc( r*0.26,r*0.04,r*0.1,0,6.28); ctx.fill();
+  ctx.strokeStyle='#2a1a0e'; ctx.lineWidth=r*0.12; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-r*0.45,-r*0.28); ctx.lineTo(-r*0.12,-r*0.12); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( r*0.45,-r*0.28); ctx.lineTo( r*0.12,-r*0.12); ctx.stroke();
+  ctx.restore();
+}
+
+// THE GIANT POOP boss — crowned, furious, gloriously silly
+function drawBossPoop(b){
+  const r=bossRadius();
+  ctx.save();
+  ctx.translate(b.x,b.y);
+  const wob = Math.sin(b.sway*3)*0.04 + (b.defeated?Math.sin(b.deathT*22)*0.12:0);
+  ctx.rotate(wob);
+  // contact shadow
+  ctx.fillStyle='rgba(0,8,18,0.22)';
+  ctx.beginPath(); ctx.ellipse(0,r*0.98,r*0.95,r*0.22,0,0,6.28); ctx.fill();
+  // body
+  const grd=ctx.createLinearGradient(0,-r*1.05,0,r*1.05);
+  grd.addColorStop(0,'#a8693a'); grd.addColorStop(0.5,'#7c4a26'); grd.addColorStop(1,'#4c2e15');
+  ctx.fillStyle=grd;
+  const blob=(cx,cy,rx,ry)=>{ ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,6.28); ctx.fill(); };
+  blob(0,r*0.52,r*1.05,r*0.62); blob(0,r*0.02,r*0.80,r*0.56); blob(0,-r*0.45,r*0.52,r*0.50);
+  ctx.beginPath(); ctx.moveTo(-r*0.2,-r*0.55); ctx.quadraticCurveTo(-r*0.05,-r*1.05,r*0.22,-r*0.78);
+  ctx.quadraticCurveTo(r*0.3,-r*0.6,r*0.2,-r*0.5); ctx.closePath(); ctx.fill();
+  // crown
+  ctx.fillStyle='#ffcf33';
+  ctx.beginPath();
+  ctx.moveTo(-r*0.42,-r*0.72); ctx.lineTo(-r*0.42,-r*1.02); ctx.lineTo(-r*0.21,-r*0.82);
+  ctx.lineTo(0,-r*1.12); ctx.lineTo(r*0.21,-r*0.82); ctx.lineTo(r*0.42,-r*1.02); ctx.lineTo(r*0.42,-r*0.72);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#e8344a';
+  ctx.beginPath(); ctx.arc(0,-r*0.86,r*0.07,0,6.28); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.12)'; ctx.fillRect(-r*0.42,-r*0.78,r*0.84,r*0.06);
+  // angry brows
+  ctx.strokeStyle='#3a2414'; ctx.lineWidth=r*0.09; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-r*0.5,-r*0.36); ctx.lineTo(-r*0.16,-r*0.18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( r*0.5,-r*0.36); ctx.lineTo( r*0.16,-r*0.18); ctx.stroke();
+  // eyes (red, furious) or X's when defeated
+  const ex=r*0.30, ey=-r*0.05, eR=r*0.20;
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.ellipse(-ex,ey,eR,eR*1.05,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( ex,ey,eR,eR*1.05,0,0,6.28); ctx.fill();
+  if(b.defeated){
+    ctx.strokeStyle='#7a1414'; ctx.lineWidth=r*0.07; ctx.lineCap='round';
+    [[-ex],[ex]].forEach(([cx])=>{ ctx.beginPath(); ctx.moveTo(cx-eR*0.5,ey-eR*0.5); ctx.lineTo(cx+eR*0.5,ey+eR*0.5); ctx.moveTo(cx+eR*0.5,ey-eR*0.5); ctx.lineTo(cx-eR*0.5,ey+eR*0.5); ctx.stroke(); });
+  } else {
+    ctx.fillStyle='#d4242e';
+    ctx.beginPath(); ctx.arc(-ex,ey+eR*0.15,eR*0.5,0,6.28); ctx.fill();
+    ctx.beginPath(); ctx.arc( ex,ey+eR*0.15,eR*0.5,0,6.28); ctx.fill();
+  }
+  // shouting mouth with teeth
+  ctx.fillStyle='#3a1410';
+  ctx.beginPath(); ctx.ellipse(0,r*0.42,r*0.34,r*0.24,0,0,6.28); ctx.fill();
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.moveTo(-r*0.30,r*0.26); ctx.lineTo(-r*0.18,r*0.26); ctx.lineTo(-r*0.24,r*0.40); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(r*0.30,r*0.26); ctx.lineTo(r*0.18,r*0.26); ctx.lineTo(r*0.24,r*0.40); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
 function render(){
   ctx.save();
   let sxk=0,syk=0;
@@ -845,6 +1039,14 @@ function render(){
   g.addColorStop(0.55, lerpColor(pa[1],pb[1],f));
   g.addColorStop(1,    lerpColor(pa[2],pb[2],f));
   ctx.fillStyle=g; ctx.fillRect(-40,-40,W+80,H+80);
+
+  // boss arena: ominous dark-red overlay
+  if(boss){
+    const bv=ctx.createRadialGradient(W/2,H*0.35,Math.min(W,H)*0.2, W/2,H*0.5,Math.max(W,H)*0.8);
+    bv.addColorStop(0,'rgba(80,10,20,0.18)');
+    bv.addColorStop(1,'rgba(40,4,12,0.55)');
+    ctx.fillStyle=bv; ctx.fillRect(-40,-40,W+80,H+80);
+  }
 
   // soft drifting bokeh orbs — quality depth, gentle, no flicker
   for(const k of bokeh){
@@ -892,6 +1094,10 @@ function render(){
 
   // obstacles — crisp vector art
   for(const o of obstacles){ drawObstacle(o); }
+
+  // boss + its projectiles
+  if(boss) drawBossPoop(boss);
+  for(const p of projectiles) drawProjectile(p);
 
   // player — custom vector SUPERHERO poop (caped, masked, glossy)
   if(state===STATE.PLAY || state===STATE.OVER){
