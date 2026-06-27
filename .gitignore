@@ -1,0 +1,5 @@
+# Local preview helpers (not needed for deployment)
+.claude/
+.vercel/
+node_modules/
+.DS_Store

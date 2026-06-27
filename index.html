@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#2a1a10">
+<title>פלופ! 🚽 צלילה אל הביוב</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#1a0f08; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; touch-action:none; overscroll-behavior:none; }
+  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas { display:block; touch-action:none; }
+
+  .overlay {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+    color:#fff; padding:24px; z-index:10;
+    background:radial-gradient(ellipse at center, rgba(60,35,18,.55), rgba(15,8,4,.92));
+    backdrop-filter:blur(2px);
+  }
+  .hidden { display:none !important; }
+
+  .title { font-size:clamp(38px,13vw,72px); font-weight:900; letter-spacing:-1px;
+    text-shadow:0 4px 0 #6b3d18, 0 8px 18px rgba(0,0,0,.6); line-height:.95; }
+  .title small { display:block; font-size:clamp(15px,5vw,26px); font-weight:700; margin-top:10px; color:#ffd98a; text-shadow:0 2px 6px rgba(0,0,0,.6); }
+  .emoji-big { font-size:clamp(60px,22vw,110px); filter:drop-shadow(0 8px 14px rgba(0,0,0,.5)); animation:bob 2s ease-in-out infinite; }
+  @keyframes bob { 0%,100%{transform:translateY(0) rotate(-4deg)} 50%{transform:translateY(-14px) rotate(4deg)} }
+
+  .btn {
+    margin-top:26px; padding:18px 44px; font-size:clamp(20px,6vw,28px); font-weight:900;
+    color:#3a2008; background:linear-gradient(#ffe08a,#ffb43f);
+    border:none; border-radius:50px; cursor:pointer;
+    box-shadow:0 6px 0 #c97d1a, 0 10px 22px rgba(0,0,0,.45);
+    transition:transform .08s, box-shadow .08s;
+  }
+  .btn:active { transform:translateY(4px); box-shadow:0 2px 0 #c97d1a, 0 5px 12px rgba(0,0,0,.4); }
+  .btn { touch-action:manipulation; }
+
+  .hint { margin-top:22px; font-size:clamp(14px,4.2vw,18px); color:#e8cda3; line-height:1.7; max-width:340px; opacity:.95; }
+  .hint b { color:#fff; }
+
+  .score-line { font-size:clamp(20px,6vw,26px); font-weight:800; margin-top:6px; }
+  .big-score { font-size:clamp(50px,16vw,88px); font-weight:900; color:#ffd98a; text-shadow:0 4px 0 #8a5417,0 8px 16px rgba(0,0,0,.5); line-height:1; }
+  .best { margin-top:10px; font-size:clamp(15px,4.5vw,20px); color:#ffcf7a; font-weight:700; }
+  .newbest { color:#7CFC9A; animation:pulse .7s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
+
+  /* HUD */
+  #hud { position:absolute; top:0; left:0; right:0; z-index:5; padding:14px 18px;
+    display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none;
+    color:#fff; text-shadow:0 2px 6px rgba(0,0,0,.7); }
+  #hud .depth { font-size:clamp(26px,8vw,40px); font-weight:900; line-height:1; }
+  #hud .depth small { font-size:.42em; font-weight:700; opacity:.85; display:block; margin-top:2px; }
+  #hud .right { text-align:left; font-size:clamp(16px,5vw,22px); font-weight:800; }
+  #corn-count .ic { filter:drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+  #combo { margin-top:6px; color:#ffd98a; opacity:0; transition:opacity .2s; }
+  #combo.show { opacity:1; }
+
+  .credit { position:absolute; bottom:14px; font-size:12px; color:#9c7c55; opacity:.7; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game"></canvas></div>
+
+<div id="hud" class="hidden">
+  <div>
+    <div class="depth"><span id="depth">0</span><small>מטר עומק</small></div>
+    <div id="combo">קומבו x<span id="combo-n">2</span>!</div>
+  </div>
+  <div class="right">
+    <div id="corn-count"><span class="ic">🌽</span> <span id="corn">0</span></div>
+  </div>
+</div>
+
+<!-- מסך פתיחה -->
+<div id="start" class="overlay">
+  <div class="emoji-big">💩</div>
+  <h1 class="title">פלופ!<small>צלילה אל הביוב 🚽</small></h1>
+  <button class="btn" id="play-btn">לְשַׁחְרֵר! 🚀</button>
+  <div class="hint">
+    גְּרֹר את האצבע <b>ימינה ושמאלה</b> כדי לתמרן<br>
+    אֱסֹף <b>🌽 תירס</b> · חֲמֹק מ-<b>🪠 מכשולים</b><br>
+    כמה עמוק תצליח לצלול? 🏆
+  </div>
+  <div class="credit">משחק לרגעים הגדולים של היום 😌</div>
+</div>
+
+<!-- מסך סיום -->
+<div id="over" class="overlay hidden">
+  <div class="emoji-big" id="over-emoji">😵</div>
+  <div class="score-line">צללת לעומק של</div>
+  <div class="big-score"><span id="final-depth">0</span> מ׳</div>
+  <div class="score-line" style="font-size:18px;margin-top:8px;opacity:.9">🌽 <span id="final-corn">0</span> · ניקוד <span id="final-score">0</span></div>
+  <div class="best" id="best-line">שיא: 0 מ׳</div>
+  <button class="btn" id="again-btn">עוֹד פַּעַם! 🔁</button>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+// ---------- Canvas setup ----------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W=0, H=0, DPR=1;
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2.5);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- Audio (WebAudio, lightweight) ----------
+let AC=null;
+function audio(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return AC; }
+function beep(freq, dur, type, vol){
+  const ac=audio(); if(!ac) return;
+  const o=ac.createOscillator(), g=ac.createGain();
+  o.type=type||'sine'; o.frequency.value=freq;
+  g.gain.value=0; o.connect(g); g.connect(ac.destination);
+  const t=ac.currentTime;
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(vol||0.18, t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.start(t); o.stop(t+dur+0.02);
+}
+function sCollect(n){ beep(520+Math.min(n,12)*45, 0.12, 'triangle', 0.16); }
+function sHit(){ beep(140,0.18,'sawtooth',0.22); setTimeout(()=>beep(90,0.25,'square',0.2),60); }
+function sStart(){ beep(330,0.1,'triangle',0.16); setTimeout(()=>beep(550,0.14,'triangle',0.16),90); }
+function sPlop(){ beep(220,0.08,'sine',0.12); }
+
+// ---------- Game state ----------
+const STATE = { MENU:0, PLAY:1, OVER:2 };
+let state = STATE.MENU;
+
+const hud   = document.getElementById('hud');
+const startEl = document.getElementById('start');
+const overEl  = document.getElementById('over');
+const depthEl = document.getElementById('depth');
+const cornEl  = document.getElementById('corn');
+const comboEl = document.getElementById('combo');
+const comboNEl= document.getElementById('combo-n');
+
+let player, obstacles, items, particles, bubbles, bokeh;
+let scrollY, speed, depthM, corn, score, comboTimer, comboMult, spawnAcc, itemAcc;
+let shake, flashHit, lastTime, frame;
+let targetX; // finger target
+
+const BEST_KEY = 'plop_best_depth_v1';
+let best = parseInt(localStorage.getItem(BEST_KEY)||'0',10) || 0;
+
+function reset(){
+  const pr = playerRadius();
+  player = { x:W/2, y:H*0.30, r:pr, vx:0, rot:0, squish:1 };
+  targetX = W/2;
+  obstacles=[]; items=[]; particles=[]; bubbles=[]; bokeh=[];
+  scrollY=0; speed=H*0.34; depthM=0; corn=0; score=0;
+  comboTimer=0; comboMult=1; spawnAcc=0; itemAcc=0;
+  shake=0; flashHit=0; frame=0;
+  for(let i=0;i<16;i++) bubbles.push(newBubble(Math.random()*H));
+  for(let i=0;i<7;i++) bokeh.push(newBokeh(Math.random()*H));
+}
+function playerRadius(){ return Math.max(26, Math.min(W,H)*0.062); }
+
+function newBubble(y){
+  return { x:Math.random()*W, y:y, r:1.5+Math.random()*5, sp:0.3+Math.random()*0.8, a:0.05+Math.random()*0.12 };
+}
+// large soft drifting orbs (depth/parallax) — gentle, never strobing
+function newBokeh(y){
+  const light = Math.random()<0.55;
+  const base = Math.min(W,H);
+  return {
+    x: Math.random()*W, y:y,
+    r: (0.16+Math.random()*0.26)*base,
+    c: light ? 'rgba(255,255,255,' : 'rgba(12,34,72,',
+    a: light ? (0.045+Math.random()*0.05) : (0.05+Math.random()*0.07),
+    sp: 0.05+Math.random()*0.10,
+    dx: (Math.random()-0.5)*0.12
+  };
+}
+
+// ---------- Spawning ----------
+// Obstacles scroll UP (player dives down). They appear at bottom (y=H) and move up.
+const OBS = [
+  {e:'🪠', label:'plunger'},
+  {e:'🧽', label:'sponge'},
+  {e:'🪥', label:'brush'},
+  {e:'🦆', label:'duck'},
+  {e:'🧻', label:'paper'}, // harmless-looking but it's an obstacle (tangle)
+];
+
+function spawnObstacle(){
+  const r = playerRadius()*(0.85+Math.random()*0.5);
+  const margin = r+10;
+  const x = margin + Math.random()*(W-2*margin);
+  const o = OBS[(Math.random()*OBS.length)|0];
+  obstacles.push({ x, y:H+r+10, r, e:o.e, rot:(Math.random()-0.5)*0.6, rs:(Math.random()-0.5)*0.04, drift:(Math.random()-0.5)*0.4 });
+}
+function spawnItem(){
+  const r = playerRadius()*0.62;
+  const margin = r+10;
+  const x = margin + Math.random()*(W-2*margin);
+  // 12% chance for toilet paper power = magnet-ish bonus (just big points)
+  const golden = Math.random()<0.12;
+  items.push({ x, y:H+r+10, r, e: golden?'⭐':'🌽', val: golden?5:1, golden, bob:Math.random()*6.28 });
+}
+
+// ---------- Particles ----------
+function burst(x,y,color,n,spd){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*6.28, s=(0.4+Math.random())*(spd||1);
+    particles.push({ x,y, vx:Math.cos(a)*s*120, vy:Math.sin(a)*s*120-40, life:1, r:2+Math.random()*4, color });
+  }
+}
+
+// ---------- Input ----------
+function pointerX(e){
+  const t = e.touches&&e.touches[0] ? e.touches[0] : e;
+  return t.clientX;
+}
+let dragging=false;
+function down(e){
+  if(state!==STATE.PLAY) return;
+  dragging=true; targetX=pointerX(e); e.preventDefault();
+}
+function move(e){
+  if(state!==STATE.PLAY||!dragging) return;
+  targetX=pointerX(e); e.preventDefault();
+}
+function up(e){ dragging=false; }
+canvas.addEventListener('touchstart',down,{passive:false});
+canvas.addEventListener('touchmove',move,{passive:false});
+canvas.addEventListener('touchend',up,{passive:false});
+canvas.addEventListener('mousedown',down);
+window.addEventListener('mousemove',move);
+window.addEventListener('mouseup',up);
+
+// ---------- Flow ----------
+function startGame(){
+  audio(); sStart();
+  reset();
+  state=STATE.PLAY;
+  startEl.classList.add('hidden');
+  overEl.classList.add('hidden');
+  hud.classList.remove('hidden');
+  lastTime=performance.now();
+}
+function gameOver(){
+  sHit();
+  state=STATE.OVER;
+  if(navigator.vibrate) navigator.vibrate(120);
+  const newBest = depthM>best;
+  if(newBest){ best=depthM; localStorage.setItem(BEST_KEY,String(best)); }
+  document.getElementById('final-depth').textContent=depthM;
+  document.getElementById('final-corn').textContent=corn;
+  document.getElementById('final-score').textContent=score;
+  const bl=document.getElementById('best-line');
+  bl.innerHTML = newBest ? '🏆 שיא חדש! '+best+' מ׳' : 'שיא: '+best+' מ׳';
+  bl.className = 'best'+(newBest?' newbest':'');
+  document.getElementById('over-emoji').textContent = newBest?'🥳':'😵';
+  hud.classList.add('hidden');
+  setTimeout(()=>overEl.classList.remove('hidden'), 380);
+}
+// Robust tap binding: works on touch (touchend) AND mouse/desktop (click),
+// deduped so a single tap never triggers twice.
+function bindTap(el, fn){
+  let handledTouch=false;
+  el.addEventListener('touchend', function(e){ handledTouch=true; e.preventDefault(); fn(); }, {passive:false});
+  el.addEventListener('click', function(e){ if(handledTouch){ handledTouch=false; return; } fn(); });
+}
+bindTap(document.getElementById('play-btn'), startGame);
+bindTap(document.getElementById('again-btn'), startGame);
+
+// ---------- Update ----------
+function update(dt){
+  frame++;
+  // difficulty ramp
+  speed = H*0.34 + depthM*0.55;
+  if(speed>H*1.15) speed=H*1.15;
+
+  scrollY += speed*dt;
+  depthM = Math.floor(scrollY/45);
+  depthEl.textContent = depthM;
+
+  // player horizontal follow (smooth)
+  const pr = playerRadius(); player.r=pr;
+  const tx = Math.max(pr, Math.min(W-pr, targetX));
+  const dx = tx - player.x;
+  player.vx = dx*10;
+  player.x += player.vx*dt;
+  player.x = Math.max(pr, Math.min(W-pr, player.x));
+  player.rot = Math.max(-0.5,Math.min(0.5, player.vx*0.0012));
+  player.squish += ((1) - player.squish)*Math.min(1,dt*8);
+
+  // spawn pacing scales with speed
+  spawnAcc += dt;
+  const obsInterval = Math.max(0.42, 0.95 - depthM*0.006);
+  if(spawnAcc>=obsInterval){ spawnAcc=0; spawnObstacle(); if(depthM>40 && Math.random()<0.35) spawnObstacle(); }
+  itemAcc += dt;
+  if(itemAcc>=0.55){ itemAcc=0; if(Math.random()<0.8) spawnItem(); }
+
+  // move obstacles up
+  for(let i=obstacles.length-1;i>=0;i--){
+    const o=obstacles[i];
+    o.y -= speed*dt;
+    o.x += o.drift;
+    o.rot += o.rs;
+    if(o.y < -o.r-20){ obstacles.splice(i,1); continue; }
+    // collision
+    const dxo=o.x-player.x, dyo=o.y-player.y;
+    const rr=(o.r*0.72+player.r*0.78);
+    if(dxo*dxo+dyo*dyo < rr*rr){
+      shake=18; burst(player.x,player.y,'#8a5417',26,2.2);
+      gameOver(); return;
+    }
+  }
+  // move items up
+  for(let i=items.length-1;i>=0;i--){
+    const it=items[i];
+    it.y -= speed*dt; it.bob+=dt*5;
+    if(it.y < -it.r-20){ items.splice(i,1); comboMult=1; comboEl.classList.remove('show'); continue; }
+    const dxi=it.x-player.x, dyi=it.y-player.y;
+    const rr=(it.r*0.7+player.r*0.8);
+    if(dxi*dxi+dyi*dyi < rr*rr){
+      items.splice(i,1);
+      comboTimer=1.6; comboMult=Math.min(comboMult+1, 9);
+      const gained = it.val*comboMult;
+      corn += it.val; score += gained*10;
+      cornEl.textContent=corn;
+      sCollect(comboMult);
+      burst(it.x,it.y, it.golden?'#ffe08a':'#ffd24a', it.golden?22:12, 1.4);
+      player.squish=1.35;
+      if(comboMult>=2){ comboNEl.textContent=comboMult; comboEl.classList.add('show'); }
+    }
+  }
+  // combo decay
+  if(comboTimer>0){ comboTimer-=dt; if(comboTimer<=0){ comboMult=1; comboEl.classList.remove('show'); } }
+
+  // particles
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.vy += 520*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt*1.6;
+    if(p.life<=0) particles.splice(i,1);
+  }
+  // bubbles (ambient, drift up — subtle speed cue, low contrast so no flicker)
+  for(const b of bubbles){
+    b.y -= (b.sp*40 + speed*0.10)*dt;
+    if(b.y < -b.r){ b.y=H+b.r; b.x=Math.random()*W; }
+  }
+  // bokeh orbs (slow parallax depth, smooth — no strobe)
+  for(const k of bokeh){
+    k.y -= (speed*k.sp)*dt;
+    k.x += k.dx;
+    if(k.y < -k.r){ k.y=H+k.r; k.x=Math.random()*W; }
+  }
+
+  if(shake>0) shake-=dt*60;
+  if(flashHit>0) flashHit-=dt*3;
+}
+
+// ---------- Render ----------
+function drawEmoji(e, x, y, size, rot, sx, sy){
+  ctx.save();
+  ctx.translate(x,y);
+  if(rot) ctx.rotate(rot);
+  if(sx||sy) ctx.scale(sx||1, sy||1);
+  ctx.font = size+'px serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(e,0,0);
+  ctx.restore();
+}
+
+// Custom vector poop character — soft swirl body, glossy sheen, big cute eyes.
+// r = half-width unit. Drawn centred on (x,y).
+function drawPoop(x,y,r,rot,sx,sy){
+  ctx.save();
+  ctx.translate(x,y);
+  if(rot) ctx.rotate(rot);
+  ctx.scale(sx||1, sy||1);
+
+  // contact shadow
+  ctx.save();
+  ctx.fillStyle='rgba(4,16,30,0.22)';
+  ctx.beginPath(); ctx.ellipse(0, r*0.96, r*0.92, r*0.24, 0, 0, 6.28); ctx.fill();
+  ctx.restore();
+
+  // body gradient (warm, dimensional)
+  const grd=ctx.createLinearGradient(0,-r*1.05,0,r*1.05);
+  grd.addColorStop(0,'#c08a55');
+  grd.addColorStop(0.45,'#9c6738');
+  grd.addColorStop(1,'#5f3c1e');
+  ctx.fillStyle=grd;
+  const blob=(cx,cy,rx,ry)=>{ ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,6.28); ctx.fill(); };
+  blob(0,  r*0.55, r*1.00, r*0.58);   // bottom tier
+  blob(0,  r*0.05, r*0.74, r*0.52);   // middle tier
+  blob(0, -r*0.42, r*0.47, r*0.45);   // top tier
+  // swirl tip
+  ctx.beginPath();
+  ctx.moveTo(-r*0.17,-r*0.55);
+  ctx.quadraticCurveTo(-r*0.05,-r*1.06, r*0.20,-r*0.74);
+  ctx.quadraticCurveTo(r*0.26,-r*0.58, r*0.17,-r*0.5);
+  ctx.closePath(); ctx.fill();
+
+  // glossy sheen highlights (upper-left)
+  ctx.fillStyle='rgba(255,228,188,0.30)';
+  ctx.beginPath(); ctx.ellipse(-r*0.34, r*0.42, r*0.30, r*0.16, -0.5, 0, 6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-r*0.20,-r*0.10, r*0.18, r*0.10, -0.5, 0, 6.28); ctx.fill();
+  // subtle rim light on the right
+  ctx.fillStyle='rgba(255,210,160,0.16)';
+  ctx.beginPath(); ctx.ellipse(r*0.5, r*0.5, r*0.12, r*0.34, 0.2, 0, 6.28); ctx.fill();
+
+  // eyes (white) — looking slightly down = cute
+  const ey=-r*0.16, ex=r*0.27, eR=r*0.21;
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.ellipse(-ex,ey,eR,eR*1.14,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( ex,ey,eR,eR*1.14,0,0,6.28); ctx.fill();
+  const pr=eR*0.52, pyo=eR*0.34;
+  ctx.fillStyle='#241a12';
+  ctx.beginPath(); ctx.arc(-ex, ey+pyo, pr,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.arc( ex, ey+pyo, pr,0,6.28); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.95)';
+  ctx.beginPath(); ctx.arc(-ex-pr*0.45, ey+pyo-pr*0.5, pr*0.42,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.arc( ex-pr*0.45, ey+pyo-pr*0.5, pr*0.42,0,6.28); ctx.fill();
+
+  // smile
+  ctx.strokeStyle='#3a2414'; ctx.lineWidth=r*0.075; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-r*0.21, r*0.22); ctx.quadraticCurveTo(0, r*0.46, r*0.21, r*0.22); ctx.stroke();
+
+  // rosy cheeks
+  ctx.fillStyle='rgba(255,135,120,0.30)';
+  ctx.beginPath(); ctx.ellipse(-r*0.45, r*0.08, r*0.12, r*0.075,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( r*0.45, r*0.08, r*0.12, r*0.075,0,0,6.28); ctx.fill();
+
+  ctx.restore();
+}
+
+function render(){
+  ctx.save();
+  let sxk=0,syk=0;
+  if(shake>0){ sxk=(Math.random()-0.5)*shake; syk=(Math.random()-0.5)*shake; ctx.translate(sxk,syk); }
+
+  // background — smooth modern gradient with a depth-based hue shift (teal -> deep indigo)
+  const tint = Math.min(depthM/240,1);
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,    lerpColor('#36cabb','#3aa6ea',tint));
+  g.addColorStop(0.55, lerpColor('#1ba6ab','#5b6fe0',tint));
+  g.addColorStop(1,    lerpColor('#0e7d8c','#2c2f8c',tint));
+  ctx.fillStyle=g; ctx.fillRect(-40,-40,W+80,H+80);
+
+  // soft drifting bokeh orbs — quality depth, gentle, no flicker
+  for(const k of bokeh){
+    const grd=ctx.createRadialGradient(k.x,k.y,0,k.x,k.y,k.r);
+    grd.addColorStop(0, k.c+k.a+')');
+    grd.addColorStop(1, k.c+'0)');
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(k.x,k.y,k.r,0,6.28); ctx.fill();
+  }
+
+  // tiny rising motes (subtle speed cue)
+  for(const b of bubbles){
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,6.28);
+    ctx.fillStyle='rgba(255,255,255,'+b.a+')'; ctx.fill();
+  }
+
+  // soft radial vignette for depth/focus (modern, low contrast)
+  const vg=ctx.createRadialGradient(W/2,H*0.42,Math.min(W,H)*0.18, W/2,H*0.5,Math.max(W,H)*0.72);
+  vg.addColorStop(0,'rgba(0,0,0,0)');
+  vg.addColorStop(1,'rgba(4,14,38,0.30)');
+  ctx.fillStyle=vg; ctx.fillRect(-40,-40,W+80,H+80);
+
+  // items — tight bright glow hugging each emoji so the corn reads clearly yellow
+  for(const it of items){
+    const s = it.r*2*(1+Math.sin(it.bob)*0.07);
+    const yy = it.y+Math.sin(it.bob)*3;
+    ctx.save();
+    ctx.shadowColor = it.golden ? 'rgba(255,236,120,0.95)' : 'rgba(255,222,60,0.9)';
+    ctx.shadowBlur = it.golden ? 18 : 13;
+    drawEmoji(it.e,it.x,yy,s,0,1,1);
+    drawEmoji(it.e,it.x,yy,s,0,1,1); // second pass = punchier glow, emoji stays crisp
+    ctx.restore();
+  }
+
+  // obstacles
+  for(const o of obstacles){
+    ctx.save(); ctx.shadowColor='rgba(0,0,0,0.4)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4;
+    drawEmoji(o.e,o.x,o.y,o.r*2,o.rot,1,1); ctx.restore();
+  }
+
+  // player — custom vector poop hero (modern, glossy, expressive)
+  if(state===STATE.PLAY || state===STATE.OVER){
+    // motion trail (fading ghosts of the character)
+    for(let i=4;i>=1;i--){
+      ctx.globalAlpha=0.07*(5-i);
+      drawPoop(player.x - player.vx*0.015*i, player.y - 10*i, player.r*(1-i*0.05), player.rot, 1, 1);
+    }
+    ctx.globalAlpha=1;
+    const sq=player.squish;
+    drawPoop(player.x, player.y, player.r, player.rot, 1/sq, sq);
+  }
+
+  // particles
+  for(const p of particles){
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,6.28); ctx.fillStyle=p.color; ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // hit flash
+  if(flashHit>0){ ctx.fillStyle='rgba(255,60,40,'+(flashHit*0.4)+')'; ctx.fillRect(-40,-40,W+80,H+80); }
+
+  ctx.restore();
+}
+
+function lerpColor(a,b,t){
+  const ca=hex(a),cb=hex(b);
+  const r=Math.round(ca[0]+(cb[0]-ca[0])*t);
+  const g=Math.round(ca[1]+(cb[1]-ca[1])*t);
+  const bl=Math.round(ca[2]+(cb[2]-ca[2])*t);
+  return 'rgb('+r+','+g+','+bl+')';
+}
+function hex(h){ h=h.replace('#',''); return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)]; }
+
+// ---------- Loop ----------
+function frameLoop(now){
+  requestAnimationFrame(frameLoop);
+  if(!lastTime) lastTime=now;
+  let dt=(now-lastTime)/1000; lastTime=now;
+  if(dt>0.05) dt=0.05; // clamp
+  if(state===STATE.PLAY) update(dt);
+  render();
+}
+
+// menu idle render
+reset();
+requestAnimationFrame(frameLoop);
+
+})();
+</script>
+</body>
+</html>
