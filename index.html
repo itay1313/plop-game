@@ -125,7 +125,7 @@
   <div id="name-entry" class="name-entry hidden">
     <div class="ne-title">🏆 נכנסת לטבלת השיאים!</div>
     <div class="ne-row">
-      <input id="name-input" type="text" maxlength="12" placeholder="רשמו את השם שלכם" autocomplete="off">
+      <input id="name-input" type="text" maxlength="12" placeholder="רשמו את השם שלכם" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
       <button class="btn-mini" id="save-name">שמור</button>
     </div>
   </div>
@@ -301,23 +301,38 @@ function burst(x,y,color,n,spd){
 }
 
 // ---------- Input ----------
+// Relative-drag steering: the poop moves by HOW FAR your finger moves, not where you
+// tap. So you can rest your thumb anywhere comfortable (low on the screen), never cover
+// the character, and there's no jarring jump when you first touch.
 function pointerX(e){
-  const t = e.touches&&e.touches[0] ? e.touches[0] : e;
+  const t = (e.touches && e.touches[0]) ? e.touches[0]
+          : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
   return t.clientX;
 }
-let dragging=false;
+const DRAG_SENS = 1.6;            // finger travel -> poop travel multiplier
+let dragging=false, dragStartX=0, dragStartTarget=0;
 function down(e){
   if(state!==STATE.PLAY) return;
-  dragging=true; targetX=pointerX(e); e.preventDefault();
+  dragging=true;
+  dragStartX = pointerX(e);
+  dragStartTarget = targetX;      // anchor here — do NOT snap the poop to the touch point
+  e.preventDefault();
 }
 function move(e){
-  if(state!==STATE.PLAY||!dragging) return;
-  targetX=pointerX(e); e.preventDefault();
+  if(state!==STATE.PLAY || !dragging) return;
+  const pr = playerRadius();
+  let nx = dragStartTarget + (pointerX(e) - dragStartX) * DRAG_SENS;
+  // re-anchor at the walls so reversing direction responds instantly (no dead zone)
+  if(nx <= pr){ nx = pr; dragStartX = pointerX(e); dragStartTarget = pr; }
+  else if(nx >= W-pr){ nx = W-pr; dragStartX = pointerX(e); dragStartTarget = W-pr; }
+  targetX = nx;
+  e.preventDefault();
 }
 function up(e){ dragging=false; }
 canvas.addEventListener('touchstart',down,{passive:false});
 canvas.addEventListener('touchmove',move,{passive:false});
 canvas.addEventListener('touchend',up,{passive:false});
+canvas.addEventListener('touchcancel',up,{passive:false});
 canvas.addEventListener('mousedown',down);
 window.addEventListener('mousemove',move);
 window.addEventListener('mouseup',up);
@@ -414,9 +429,9 @@ function update(dt){
     if(keys.right) targetX += step;
   }
   targetX = Math.max(pr, Math.min(W-pr, targetX));
-  // smooth, snappy follow (critically-damped feel)
+  // smooth, snappy follow (tight tracking for responsive touch control)
   const prevX = player.x;
-  player.x += (targetX - player.x) * Math.min(1, 14*dt);
+  player.x += (targetX - player.x) * Math.min(1, 20*dt);
   player.x = Math.max(pr, Math.min(W-pr, player.x));
   player.vx = dt>0 ? (player.x - prevX)/dt : 0;
   player.rot = Math.max(-0.5, Math.min(0.5, player.vx*0.0011));
