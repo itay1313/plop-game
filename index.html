@@ -84,6 +84,22 @@
   #combo.show { opacity:1; }
 
   .credit { position:absolute; bottom:14px; font-size:12px; color:#9c7c55; opacity:.7; }
+
+  #level-badge { margin-top:6px; font-size:clamp(13px,4vw,17px); font-weight:800; color:#ffe08a;
+    text-shadow:0 2px 6px rgba(0,0,0,.7); }
+  .levelup {
+    position:absolute; top:36%; left:0; right:0; text-align:center; z-index:6; pointer-events:none;
+    font-size:clamp(34px,11vw,62px); font-weight:900; color:#fff; opacity:0; letter-spacing:-1px;
+    text-shadow:0 3px 0 rgba(0,0,0,.35), 0 0 26px rgba(255,236,150,.7);
+  }
+  .levelup.show { animation:levelpop 1.5s ease-out forwards; }
+  @keyframes levelpop {
+    0%   { opacity:0; transform:scale(.5) translateY(14px); }
+    18%  { opacity:1; transform:scale(1.18) translateY(0); }
+    34%  { transform:scale(1.0); }
+    75%  { opacity:1; transform:scale(1.0); }
+    100% { opacity:0; transform:scale(1.06) translateY(-16px); }
+  }
 </style>
 </head>
 <body>
@@ -96,8 +112,10 @@
   </div>
   <div class="right">
     <div id="corn-count"><span class="ic">🌽</span> <span id="corn">0</span></div>
+    <div id="level-badge">שלב <span id="level">1</span></div>
   </div>
 </div>
+<div id="levelup" class="levelup"></div>
 
 <!-- מסך פתיחה -->
 <div id="start" class="overlay">
@@ -179,6 +197,7 @@ function sCollect(n){ beep(520+Math.min(n,12)*45, 0.12, 'triangle', 0.16); }
 function sHit(){ beep(140,0.18,'sawtooth',0.22); setTimeout(()=>beep(90,0.25,'square',0.2),60); }
 function sSmash(){ beep(320,0.08,'square',0.18); setTimeout(()=>beep(180,0.12,'sawtooth',0.16),40); }
 function sPower(){ beep(440,0.1,'triangle',0.18); setTimeout(()=>beep(660,0.1,'triangle',0.18),80); setTimeout(()=>beep(880,0.14,'triangle',0.18),160); }
+function sLevelUp(){ beep(523,0.12,'triangle',0.18); setTimeout(()=>beep(659,0.12,'triangle',0.18),95); setTimeout(()=>beep(784,0.14,'triangle',0.2),190); setTimeout(()=>beep(1047,0.22,'triangle',0.18),300); }
 function sStart(){ beep(330,0.1,'triangle',0.16); setTimeout(()=>beep(550,0.14,'triangle',0.16),90); }
 function sPlop(){ beep(220,0.08,'sine',0.12); }
 
@@ -193,6 +212,8 @@ const depthEl = document.getElementById('depth');
 const cornEl  = document.getElementById('corn');
 const comboEl = document.getElementById('combo');
 const comboNEl= document.getElementById('combo-n');
+const levelEl = document.getElementById('level');
+const levelupEl = document.getElementById('levelup');
 const nameEntry = document.getElementById('name-entry');
 const nameInput = document.getElementById('name-input');
 const lbOverEl  = document.getElementById('lb-over');
@@ -201,6 +222,18 @@ const lbStartEl = document.getElementById('lb-start');
 let player, obstacles, items, particles, bubbles, bokeh;
 let scrollY, speed, depthM, corn, score, comboTimer, comboMult, spawnAcc, itemAcc;
 let shieldTimer, powerAcc, flashGood;
+let level, lastLevel;
+const LEVEL_SIZE = 50; // metres per stage
+// each stage has its own colour "zone"; the background morphs between them as you descend
+const PALETTES = [
+  ['#36cabb','#1ba6ab','#0e7d8c'], // 1 · teal
+  ['#5b74e6','#4a3fb6','#2c2f8c'], // 2 · indigo
+  ['#f0925a','#d8567a','#9c3a6e'], // 3 · sunset
+  ['#3aa6ea','#2f6fd6','#1f3f9e'], // 4 · ocean
+  ['#54c06a','#2f9a66','#176b54'], // 5 · jungle
+  ['#e8566e','#b23a72','#6e2a70'], // 6 · magenta
+  ['#8a63e0','#5b3fb6','#311f6e'], // 7 · violet deep
+];
 let shake, flashHit, lastTime, frame;
 let targetX; // finger target
 
@@ -242,6 +275,7 @@ function reset(){
   scrollY=0; speed=H*0.28; depthM=0; corn=0; score=0;
   comboTimer=0; comboMult=1; spawnAcc=0; itemAcc=0;
   shieldTimer=0; powerAcc=0; flashGood=0;
+  level=1; lastLevel=1;
   shake=0; flashHit=0; frame=0;
   for(let i=0;i<16;i++) bubbles.push(newBubble(Math.random()*H));
   for(let i=0;i<7;i++) bokeh.push(newBokeh(Math.random()*H));
@@ -354,6 +388,7 @@ function startGame(){
   startEl.classList.add('hidden');
   overEl.classList.add('hidden');
   nameEntry.classList.add('hidden');
+  levelupEl.classList.remove('show'); levelEl.textContent='1';
   hud.classList.remove('hidden');
   keys.left=keys.right=false;
   lastTime=performance.now();
@@ -391,6 +426,17 @@ function commitName(){
   renderLB(lbOverEl, entry); renderLB(lbStartEl);
   beep(660,0.12,'triangle',0.16); setTimeout(()=>beep(880,0.14,'triangle',0.16),90);
 }
+// Stage up! banner + sound + a little juice
+function levelUp(lv){
+  levelupEl.textContent = 'שלב '+lv+'! ⚡';
+  levelupEl.classList.remove('show'); void levelupEl.offsetWidth; // restart the animation
+  levelupEl.classList.add('show');
+  flashGood = Math.max(flashGood, 0.7);
+  shake = Math.max(shake, 6);
+  sLevelUp();
+  if(navigator.vibrate) navigator.vibrate(35);
+}
+
 // Robust tap binding: works on touch (touchend) AND mouse/desktop (click),
 // deduped so a single tap never triggers twice.
 function bindTap(el, fn){
@@ -407,13 +453,21 @@ renderLB(lbStartEl); // show standings on the menu
 // ---------- Update ----------
 function update(dt){
   frame++;
-  // difficulty ramp — gentler start, lower cap (fairer to dodge)
-  speed = H*0.28 + depthM*0.40;
-  if(speed>H*0.95) speed=H*0.95;
+  // difficulty ramp — gentle start, speed keeps climbing as you descend (stages)
+  speed = H*0.26 + depthM*0.62;
+  if(speed>H*1.15) speed=H*1.15;
 
   scrollY += speed*dt;
   depthM = Math.floor(scrollY/45);
   depthEl.textContent = depthM;
+
+  // stage / level progression
+  level = Math.floor(depthM/LEVEL_SIZE)+1;
+  if(level !== lastLevel){
+    lastLevel = level;
+    levelEl.textContent = level;
+    levelUp(level);
+  }
 
   // steering: keyboard nudges the target; pointer drag sets it directly
   const pr = playerRadius(); player.r=pr;
@@ -431,10 +485,10 @@ function update(dt){
   player.rot = Math.max(-0.5, Math.min(0.5, player.vx*0.0011));
   player.squish += (1 - player.squish)*Math.min(1,dt*8);
 
-  // spawn pacing — fewer obstacles, gentler ramp, always room to pass
+  // spawn pacing — gentle start, gets busier as the stages climb (always room to pass)
   spawnAcc += dt;
-  const obsInterval = Math.max(0.72, 1.30 - depthM*0.004);
-  if(spawnAcc>=obsInterval){ spawnAcc=0; spawnObstacle(); if(depthM>140 && Math.random()<0.25) spawnObstacle(); }
+  const obsInterval = Math.max(0.6, 1.30 - depthM*0.0048);
+  if(spawnAcc>=obsInterval){ spawnAcc=0; spawnObstacle(); if(depthM>120 && Math.random()<0.3) spawnObstacle(); }
   itemAcc += dt;
   if(itemAcc>=0.55){ itemAcc=0; if(Math.random()<0.82) spawnItem(); }
   // shield power-ups appear occasionally once you're a bit deeper
@@ -781,12 +835,15 @@ function render(){
   let sxk=0,syk=0;
   if(shake>0){ sxk=(Math.random()-0.5)*shake; syk=(Math.random()-0.5)*shake; ctx.translate(sxk,syk); }
 
-  // background — smooth modern gradient with a depth-based hue shift (teal -> deep indigo)
-  const tint = Math.min(depthM/240,1);
+  // background — each stage is a colour zone; morph smoothly between zones as you descend
+  const prog = Math.max(0, depthM/LEVEL_SIZE);
+  const li = Math.floor(prog), f = prog - li;
+  const pa = PALETTES[li % PALETTES.length];
+  const pb = PALETTES[(li+1) % PALETTES.length];
   const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,    lerpColor('#36cabb','#3aa6ea',tint));
-  g.addColorStop(0.55, lerpColor('#1ba6ab','#5b6fe0',tint));
-  g.addColorStop(1,    lerpColor('#0e7d8c','#2c2f8c',tint));
+  g.addColorStop(0,    lerpColor(pa[0],pb[0],f));
+  g.addColorStop(0.55, lerpColor(pa[1],pb[1],f));
+  g.addColorStop(1,    lerpColor(pa[2],pb[2],f));
   ctx.fillStyle=g; ctx.fillRect(-40,-40,W+80,H+80);
 
   // soft drifting bokeh orbs — quality depth, gentle, no flicker
