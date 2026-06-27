@@ -311,24 +311,16 @@ function pointerX(e){
           : (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
   return t.clientX;
 }
-const DRAG_SENS = 1.6;            // finger travel -> poop travel multiplier
-let dragging=false, dragStartX=0, dragStartTarget=0;
+// Direct control: the poop tracks your finger's horizontal position (playfield maps
+// 1:1 to the screen). Point where you want to go — responsive and easy to dodge.
+let dragging=false;
 function down(e){
   if(state!==STATE.PLAY) return;
-  dragging=true;
-  dragStartX = pointerX(e);
-  dragStartTarget = targetX;      // anchor here — do NOT snap the poop to the touch point
-  e.preventDefault();
+  dragging=true; targetX = pointerX(e); e.preventDefault();
 }
 function move(e){
   if(state!==STATE.PLAY || !dragging) return;
-  const pr = playerRadius();
-  let nx = dragStartTarget + (pointerX(e) - dragStartX) * DRAG_SENS;
-  // re-anchor at the walls so reversing direction responds instantly (no dead zone)
-  if(nx <= pr){ nx = pr; dragStartX = pointerX(e); dragStartTarget = pr; }
-  else if(nx >= W-pr){ nx = W-pr; dragStartX = pointerX(e); dragStartTarget = W-pr; }
-  targetX = nx;
-  e.preventDefault();
+  targetX = pointerX(e); e.preventDefault();
 }
 function up(e){ dragging=false; }
 canvas.addEventListener('touchstart',down,{passive:false});
@@ -431,9 +423,9 @@ function update(dt){
     if(keys.right) targetX += step;
   }
   targetX = Math.max(pr, Math.min(W-pr, targetX));
-  // smooth, snappy follow (tight tracking for responsive touch control)
+  // smooth, snappy follow — tight tracking so the poop keeps up for quick dodges
   const prevX = player.x;
-  player.x += (targetX - player.x) * Math.min(1, 20*dt);
+  player.x += (targetX - player.x) * Math.min(1, 26*dt);
   player.x = Math.max(pr, Math.min(W-pr, player.x));
   player.vx = dt>0 ? (player.x - prevX)/dt : 0;
   player.rot = Math.max(-0.5, Math.min(0.5, player.vx*0.0011));
